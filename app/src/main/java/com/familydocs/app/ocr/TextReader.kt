@@ -11,7 +11,7 @@ class TextReader {
     private val recognizer by lazy { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
 
     suspend fun read(pages: List<Bitmap>): String =
-        pages.joinToString("\n") { recognizer.process(InputImage.fromBitmap(it, 0)).await().text }
+        pages.map { recognizer.process(InputImage.fromBitmap(it, 0)).await().text }.joinToString("\n")
 
     suspend fun readAndParse(pages: List<Bitmap>): Pair<String, DocumentParser.Result> {
         val text = read(pages)

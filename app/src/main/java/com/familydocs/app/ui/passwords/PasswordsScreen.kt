@@ -61,7 +61,7 @@ fun PasswordsScreen(memberId: String, onBack: () -> Unit) {
     Scaffold(
         topBar = { BackBar("${member?.name ?: ""} · Passwords", onBack) },
         floatingActionButton = {
-            ExtendedFloatingActionButton({ adding = true }, icon = { Icon(Icons.Outlined.Add, null) }, text = { Text("Add login") },
+            ExtendedFloatingActionButton(onClick = { adding = true }, icon = { Icon(Icons.Outlined.Add, null) }, text = { Text("Add login") },
                 containerColor = MaterialTheme.colorScheme.secondary, contentColor = MaterialTheme.colorScheme.onSecondary)
         },
         containerColor = MaterialTheme.colorScheme.background,
