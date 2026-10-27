@@ -31,6 +31,8 @@ data class MemberEntity(
     val createdAt: Long = System.currentTimeMillis(),
     /** The "Common" vault: one per family, every account holder can see and edit it. */
     val shared: Boolean = false,
+    /** Illustrated character used when there's no photo (e.g. "char_blue_short"). Added in database version 2. */
+    val avatar: String? = null,
 )
 
 enum class DisplayMode { ICON, FROM_FILE, CUSTOM }

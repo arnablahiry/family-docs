@@ -28,7 +28,9 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.familydocs.app.ui.components.LocalContainer
 import com.familydocs.app.ui.nav.AppRoot
-import com.familydocs.app.ui.theme.FamilyDocsTheme
+import com.familydocs.app.ui.ds.FdTheme
+import com.familydocs.app.ui.ds.FdToastState
+import com.familydocs.app.ui.ds.LocalToast
 import kotlinx.coroutines.launch
 
 /** FragmentActivity (not plain ComponentActivity) because BiometricPrompt needs it. */
@@ -67,8 +69,9 @@ class MainActivity : FragmentActivity() {
             // Everything the user sees is recorded into this layer so the theme switch can freeze a picture of it.
             val screen = rememberGraphicsLayer()
             reveal.capture = { screen.toImageBitmap() }
-            CompositionLocalProvider(LocalContainer provides container, LocalThemeReveal provides reveal) {
-                FamilyDocsTheme(dark = dark) {
+            val toast = remember { FdToastState() }
+            CompositionLocalProvider(LocalContainer provides container, LocalThemeReveal provides reveal, LocalToast provides toast) {
+                FdTheme(dark = dark) {
                     Box(Modifier.fillMaxSize()) {
                         Box(Modifier.fillMaxSize().drawWithContent {
                             screen.record { this@drawWithContent.drawContent() }

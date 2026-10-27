@@ -1,31 +1,20 @@
 package com.familydocs.app.ui.passwords
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.Casino
-import androidx.compose.material.icons.outlined.ContentCopy
-import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.Visibility
-import androidx.compose.material.icons.outlined.VisibilityOff
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ExtendedFloatingActionButton
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,79 +24,110 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.familydocs.app.domain.DocIcon
-import com.familydocs.app.ui.components.BackBar
-import com.familydocs.app.ui.components.DocIconTile
+import com.familydocs.app.data.PasswordEntity
 import com.familydocs.app.ui.components.LocalContainer
 import com.familydocs.app.ui.components.copySensitive
-import com.familydocs.app.ui.theme.MonoFont
+import com.familydocs.app.ui.ds.Fd
+import com.familydocs.app.ui.ds.FdButton
+import com.familydocs.app.ui.ds.FdEmpty
+import com.familydocs.app.ui.ds.FdFab
+import com.familydocs.app.ui.ds.FdField
+import com.familydocs.app.ui.ds.FdIconButton
+import com.familydocs.app.ui.ds.FdInput
+import com.familydocs.app.ui.ds.FdLic
+import com.familydocs.app.ui.ds.FdList
+import com.familydocs.app.ui.ds.FdSectionTitle
+import com.familydocs.app.ui.ds.FdSheet
+import com.familydocs.app.ui.ds.FdTopBar
+import com.familydocs.app.ui.ds.LocalToast
+import com.familydocs.app.ui.ds.SheetTitle
+import com.familydocs.app.ui.ds.fdText
 import kotlinx.coroutines.launch
 import java.security.SecureRandom
 
+/** Demo `passwords`: "<name> · Passwords", "N saved", a `.list` of logins with reveal / copy / delete, and an "Add login" fab. */
 @Composable
 fun PasswordsScreen(memberId: String, onBack: () -> Unit) {
-    val c = LocalContainer.current
+    val app = LocalContainer.current
+    val c = Fd.c
     val context = LocalContext.current
+    val toast = LocalToast.current
     val scope = rememberCoroutineScope()
-    val member by c.repo.member(memberId).collectAsStateWithLifecycle(null)
-    val items by c.repo.passwords(memberId).collectAsStateWithLifecycle(emptyList())
+    val member by app.repo.member(memberId).collectAsStateWithLifecycle(null)
+    val items by app.repo.passwords(memberId).collectAsStateWithLifecycle(emptyList())
     var revealed by remember { mutableStateOf(setOf<String>()) }
     var adding by remember { mutableStateOf(false) }
 
-    Scaffold(
-        topBar = { BackBar("${member?.name ?: ""} · Passwords", onBack) },
-        floatingActionButton = {
-            ExtendedFloatingActionButton(onClick = { adding = true }, icon = { Icon(Icons.Outlined.Add, null) }, text = { Text("Add login") },
-                containerColor = MaterialTheme.colorScheme.secondary, contentColor = MaterialTheme.colorScheme.onSecondary)
-        },
-        containerColor = MaterialTheme.colorScheme.background,
-    ) { pad ->
-        LazyColumn(Modifier.fillMaxSize().padding(pad), contentPadding = PaddingValues(bottom = 100.dp)) {
-            if (items.isEmpty()) item { Text("No passwords yet.", Modifier.padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            items(items, key = { it.id }) { p ->
-                val show = p.id in revealed
-                Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 4.dp, top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    DocIconTile("Passwords", size = 38.dp, iconOverride = DocIcon.KEY, hueOverride = 0xFF8C6A2B)
-                    Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                        Text(p.site, fontWeight = FontWeight.SemiBold)
-                        Text(p.username, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(if (show) p.password else "••••••••••", fontFamily = MonoFont, fontSize = 13.sp)
+    Box(Modifier.fillMaxSize().background(c.bg)) {
+        Column(Modifier.fillMaxSize().statusBarsPadding()) {
+            FdTopBar("${member?.name.orEmpty()} · Passwords", onBack)
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+                FdSectionTitle("${items.size} saved")
+                if (items.isEmpty()) FdEmpty("No passwords yet.")
+                else FdList {
+                    items.forEachIndexed { i, p ->
+                        PwRow(p, i == 0, p.id in revealed,
+                            onReveal = { revealed = if (p.id in revealed) revealed - p.id else revealed + p.id },
+                            onCopy = { copySensitive(context, p.site, p.password); toast.show("Copied") },
+                            onDelete = { scope.launch { app.repo.deletePassword(p.id); toast.show("Deleted ${p.site}") } })
                     }
-                    IconButton({ revealed = if (show) revealed - p.id else revealed + p.id }) { Icon(if (show) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, if (show) "Hide" else "Show") }
-                    IconButton({ copySensitive(context, p.site, p.password) }) { Icon(Icons.Outlined.ContentCopy, "Copy password", Modifier.size(19.dp)) }
-                    IconButton({ scope.launch { c.repo.deletePassword(p.id) } }) { Icon(Icons.Outlined.Delete, "Delete", Modifier.size(19.dp)) }
                 }
-                HorizontalDivider(Modifier.padding(start = 70.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                Spacer(Modifier.height(100.dp))
             }
         }
+        FdFab("Add login", onClick = { adding = true }, modifier = Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 18.dp, bottom = 22.dp))
     }
 
     if (adding) {
         var site by remember { mutableStateOf("") }
         var user by remember { mutableStateOf("") }
         var pass by remember { mutableStateOf("") }
-        AlertDialog(
-            onDismissRequest = { adding = false },
-            title = { Text("Add login") },
-            text = {
-                Column {
-                    OutlinedTextField(site, { site = it }, label = { Text("Website or app") }, singleLine = true)
-                    OutlinedTextField(user, { user = it }, label = { Text("Username or phone") }, singleLine = true)
-                    OutlinedTextField(pass, { pass = it }, label = { Text("Password") }, singleLine = true,
-                        trailingIcon = { IconButton({ pass = generatePassword() }) { Icon(Icons.Outlined.Casino, "Generate password") } })
+        FdSheet({ adding = false }) {
+            SheetTitle("Add login", "For ${member?.name.orEmpty()}")
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                FdField("Website or app") { FdInput(site, { site = it }, placeholder = "e.g. DigiLocker") }
+                FdField("Username or phone") { FdInput(user, { user = it }) }
+                FdField("Password") {
+                    FdInput(pass, { pass = it }, mono = true, trailing = {
+                        FdIconButton("dice", { pass = generatePassword() }, size = 36.dp, iconSize = 19.dp, tint = c.muted, description = "Generate password")
+                    })
                 }
-            },
-            confirmButton = { TextButton({ scope.launch { c.repo.savePassword(memberId, site.trim(), user.trim(), pass); adding = false } }, enabled = site.isNotBlank()) { Text("Save") } },
-            dismissButton = { TextButton({ adding = false }) { Text("Cancel") } },
-        )
+                FdButton("Save login", {
+                    if (site.isBlank()) { toast.show("Add the website or app name"); return@FdButton }
+                    scope.launch { app.repo.savePassword(memberId, site.trim(), user.trim(), pass); adding = false; toast.show("Saved ${site.trim()}") }
+                })
+            }
+        }
     }
 }
 
-private val WORDS = listOf("mango", "river", "lotus", "monsoon", "cedar", "harbor", "saffron", "olive", "aegean", "tulip", "teesta", "lantern")
+@Composable
+private fun PwRow(p: PasswordEntity, first: Boolean, show: Boolean, onReveal: () -> Unit, onCopy: () -> Unit, onDelete: () -> Unit) {
+    val c = Fd.c
+    Column {
+        if (!first) Box(Modifier.fillMaxWidth().height(1.dp).background(c.line))
+        Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            FdLic("key")
+            Column(Modifier.weight(1f)) {
+                Text(p.site, style = fdText(14f, FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (p.username.isNotBlank()) Text(p.username, style = fdText(12f, color = c.muted), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(if (show) p.password else "••••••••••", style = fdText(12f, color = c.muted).copy(fontFamily = FontFamily.Monospace),
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            FdIconButton(if (show) "eyeoff" else "eye", onReveal, iconSize = 19.dp, tint = c.fg, description = if (show) "Hide password" else "Show password")
+            FdIconButton("copy", onCopy, iconSize = 18.dp, tint = c.fg, description = "Copy password")
+            FdIconButton("trash", onDelete, iconSize = 18.dp, tint = c.fg, description = "Delete")
+        }
+    }
+}
+
+private val WORDS = listOf("mango", "river", "lotus", "monsoon", "cedar", "harbor", "saffron", "olive", "aegean", "tulip")
 private fun generatePassword(): String {
     val r = SecureRandom()
     fun w() = WORDS[r.nextInt(WORDS.size)]

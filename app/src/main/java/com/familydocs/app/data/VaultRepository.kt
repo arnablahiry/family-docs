@@ -7,6 +7,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
+const val DEFAULT_SELF_AVATAR = "char_blue_short"
+val CHARACTER_KEYS = listOf("char_blue_short", "char_peach_bun", "char_lilac_long", "char_mint_glasses", "char_sand_bun", "char_rose_long", "char_sky_short", "char_slate_glasses")
+
 class VaultRepository(private val dao: VaultDao, val files: FileStore) {
     val account: Flow<AccountEntity?> = dao.account()
     val members: Flow<List<MemberEntity>> = dao.members()
@@ -19,21 +22,35 @@ class VaultRepository(private val dao: VaultDao, val files: FileStore) {
     fun passwords(memberId: String) = dao.passwords(memberId)
 
     suspend fun accountNow() = dao.accountNow()
+    suspend fun selfNow() = dao.selfNow()
+    suspend fun documentsCount(memberId: String) = dao.documentsNow(memberId).size
+    fun self() = dao.self()
     suspend fun documentNow(id: String) = dao.documentNow(id)
     suspend fun memberNow(id: String) = dao.memberNow(id)
 
-    /** Creates or updates the account and the matching "You" member. */
-    suspend fun saveAccount(name: String, cc: String, phone: String, email: String, photo: ByteArray?, google: Boolean, countries: List<String>) = withContext(Dispatchers.IO) {
-        val old = dao.accountNow()
-        val photoId = photo?.let { files.put(it) } ?: old?.photoFile
-        if (photo != null) files.delete(old?.photoFile?.takeIf { it != photoId })
-        dao.upsertAccount(AccountEntity(name = name, countryCode = cc, phone = phone, backupEmail = email, photoFile = photoId, googleLinked = google, countries = Countries.encode(countries)))
+    /**
+     * Creates or updates the account and the matching "You" member. Your profile photo is ONE file shared by the
+     * account and your circle on the home screen, so changing it in either place changes both.
+     * [photo] = new picture, [removePhoto] = go back to the character, otherwise the current photo is kept.
+     */
+    suspend fun saveAccount(
+        name: String, cc: String, phone: String, email: String, photo: ByteArray?, google: Boolean, countries: List<String>,
+        removePhoto: Boolean = false, avatar: String? = null,
+    ) = withContext(Dispatchers.IO) {
+        val oldAccount = dao.accountNow()
         val self = dao.selfNow()
-        // The "You" member keeps its own copy of the photo so it can be changed independently later.
-        val memberPhoto = if (photo != null) files.put(photo).also { files.delete(self?.photoFile) } else self?.photoFile
+        val oldPhotos = setOfNotNull(oldAccount?.photoFile, self?.photoFile)
+        val photoId = when {
+            photo != null -> files.put(photo)
+            removePhoto -> null
+            else -> self?.photoFile ?: oldAccount?.photoFile
+        }
+        oldPhotos.filter { it != photoId }.forEach { files.delete(it) }
+        dao.upsertAccount(AccountEntity(name = name, countryCode = cc, phone = phone, backupEmail = email, photoFile = photoId, googleLinked = google,
+            countries = Countries.encode(countries)))
         dao.upsertMember(
-            (self ?: MemberEntity(id = UUID.randomUUID().toString(), name = name, relation = "You", photoFile = null, isSelf = true))
-                .copy(name = name, photoFile = memberPhoto),
+            (self ?: MemberEntity(id = UUID.randomUUID().toString(), name = name, relation = "You", photoFile = null, isSelf = true, avatar = DEFAULT_SELF_AVATAR))
+                .let { it.copy(name = name, photoFile = photoId, avatar = avatar ?: it.avatar ?: DEFAULT_SELF_AVATAR) },
         )
         // Every family gets one Common vault (rent, bills, Wi-Fi...) that all account holders share.
         if (dao.sharedNow() == null) {
@@ -41,17 +58,30 @@ class VaultRepository(private val dao: VaultDao, val files: FileStore) {
         }
     }
 
-    suspend fun saveMember(id: String?, name: String, relation: String, photo: ByteArray?, keepPhoto: Boolean) = withContext(Dispatchers.IO) {
+    /** Add or edit a person. For yourself this also updates the account photo (same file). */
+    suspend fun saveMember(id: String?, name: String, relation: String, photo: ByteArray?, keepPhoto: Boolean, avatar: String?) = withContext(Dispatchers.IO) {
         val old = id?.let { dao.memberNow(it) }
         val photoId = when {
-            photo != null -> files.put(photo).also { files.delete(old?.photoFile) }
+            photo != null -> files.put(photo)
             keepPhoto -> old?.photoFile
-            else -> null.also { files.delete(old?.photoFile) }
+            else -> null
         }
+        old?.photoFile?.takeIf { it != photoId }?.let { files.delete(it) }
+        val chosenAvatar = avatar ?: old?.avatar ?: nextCharacter()
         dao.upsertMember(
-            old?.copy(name = name, relation = relation, photoFile = photoId)
-                ?: MemberEntity(UUID.randomUUID().toString(), name, relation, photoId),
+            old?.copy(name = name, relation = relation, photoFile = photoId, avatar = chosenAvatar)
+                ?: MemberEntity(UUID.randomUUID().toString(), name, relation, photoId, avatar = chosenAvatar),
         )
+        if (old?.isSelf == true) dao.accountNow()?.let { a ->
+            if (a.photoFile != photoId) { a.photoFile?.takeIf { it != old.photoFile && it != photoId }?.let { files.delete(it) } }
+            dao.upsertAccount(a.copy(name = name, photoFile = photoId))
+        }
+    }
+
+    /** First character nobody uses yet, so a new person looks different from the others. */
+    suspend fun nextCharacter(): String {
+        val used = dao.membersNow().mapNotNull { it.avatar }.toSet()
+        return CHARACTER_KEYS.firstOrNull { it !in used } ?: CHARACTER_KEYS[used.size % CHARACTER_KEYS.size]
     }
 
     suspend fun deleteMember(id: String) = withContext(Dispatchers.IO) {

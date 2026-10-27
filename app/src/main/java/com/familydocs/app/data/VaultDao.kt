@@ -17,6 +17,7 @@ interface VaultDao {
     @Query("SELECT * FROM members WHERE id = :id") fun member(id: String): Flow<MemberEntity?>
     @Query("SELECT * FROM members WHERE id = :id") suspend fun memberNow(id: String): MemberEntity?
     @Query("SELECT * FROM members WHERE isSelf = 1 LIMIT 1") suspend fun selfNow(): MemberEntity?
+    @Query("SELECT * FROM members WHERE isSelf = 1 LIMIT 1") fun self(): Flow<MemberEntity?>
     @Query("SELECT * FROM members WHERE shared = 1 LIMIT 1") suspend fun sharedNow(): MemberEntity?
     @Upsert suspend fun upsertMember(m: MemberEntity)
     @Query("DELETE FROM members WHERE id = :id") suspend fun deleteMemberRow(id: String)

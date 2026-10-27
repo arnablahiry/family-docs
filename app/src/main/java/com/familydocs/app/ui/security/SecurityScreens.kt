@@ -1,25 +1,20 @@
 package com.familydocs.app.ui.security
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Lock
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -31,26 +26,37 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.familydocs.app.security.BiometricHelper
 import com.familydocs.app.security.PasscodeManager
-import com.familydocs.app.ui.components.Avatar
-import com.familydocs.app.ui.components.BackBar
 import com.familydocs.app.ui.components.LocalContainer
-import com.familydocs.app.ui.components.PinDots
-import com.familydocs.app.ui.components.PinPad
+import com.familydocs.app.ui.ds.BtnKind
+import com.familydocs.app.ui.ds.Fd
+import com.familydocs.app.ui.ds.FdAvatar
+import com.familydocs.app.ui.ds.FdButton
+import com.familydocs.app.ui.ds.FdChip
+import com.familydocs.app.ui.ds.FdDots
+import com.familydocs.app.ui.ds.FdIcon
+import com.familydocs.app.ui.ds.FdKeypad
+import com.familydocs.app.ui.ds.FdSheet
+import com.familydocs.app.ui.ds.FdTextButton
+import com.familydocs.app.ui.ds.FdTopBar
+import com.familydocs.app.ui.ds.SheetTitle
+import com.familydocs.app.ui.ds.fdText
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** Choose a 4- or 6-digit passcode, then confirm it. */
+/** `.pc` set-up: lock tile, title, 4/6-digit chips, dots, keypad; type it twice. */
 @Composable
 fun PasscodeSetupScreen(title: String, onBack: (() -> Unit)?, onComplete: (String) -> Unit) {
+    val c = Fd.c
     var length by remember { mutableIntStateOf(6) }
     var first by remember { mutableStateOf<String?>(null) }
     var pin by remember { mutableStateOf("") }
@@ -58,115 +64,118 @@ fun PasscodeSetupScreen(title: String, onBack: (() -> Unit)?, onComplete: (Strin
     var sub by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
-    Column(Modifier.fillMaxSize().safeDrawingPadding(), horizontalAlignment = Alignment.CenterHorizontally) {
-        if (onBack != null) BackBar(title, onBack) else Spacer(Modifier.height(56.dp))
-        Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.size(60.dp)) {
-            Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.Lock, null, tint = MaterialTheme.colorScheme.secondary) }
-        }
-        Text(if (first == null) "Create a passcode" else "Type it once more", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 16.dp))
-        Text(sub ?: if (first == null) "You'll use it every time you open Family Docs" else "Confirm your new passcode",
-            color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp))
-        if (first == null) Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 10.dp)) {
-            listOf(4, 6).forEach { n -> FilterChip(selected = length == n, onClick = { length = n; pin = "" }, label = { Text("$n digits") }) }
-        }
-        Spacer(Modifier.height(22.dp))
-        PinDots(length, pin.length, shake)
-        Spacer(Modifier.weight(1f))
-        PinPad(
-            onDigit = { d ->
-                if (pin.length >= length) return@PinPad
-                pin += d
-                if (pin.length == length) scope.launch {
-                    delay(140)
-                    val f = first
-                    when {
-                        f == null -> { first = pin; pin = ""; sub = null }
-                        f == pin -> onComplete(pin)
-                        else -> { shake++; sub = "Those didn't match. Start again."; delay(700); first = null; pin = "" }
-                    }
-                }
-            },
-            onDelete = { pin = pin.dropLast(1) },
-        )
-        Spacer(Modifier.height(28.dp))
-    }
-}
-
-@Composable
-fun LockScreen(activity: FragmentActivity) {
-    val c = LocalContainer.current
-    val account by c.repo.account.collectAsStateWithLifecycle(null)
-    val settings by c.settings.state.collectAsStateWithLifecycle()
-    val scope = rememberCoroutineScope()
-    var pin by remember { mutableStateOf("") }
-    var shake by remember { mutableIntStateOf(0) }
-    var sub by remember { mutableStateOf("Enter your passcode") }
-    var lockedFor by remember { mutableLongStateOf(c.passcode.lockoutLeft()) }
-    var forgot by remember { mutableStateOf(false) }
-    var resetting by remember { mutableStateOf(false) }
-    val bio = settings.biometric && BiometricHelper.available(activity)
-    val len = c.passcode.length
-
-    fun biometric() = BiometricHelper.authenticate(activity, "Unlock Family Docs", onSuccess = { c.appLock.unlock() })
-    LaunchedEffect(Unit) { if (bio) biometric() }
-    LaunchedEffect(lockedFor > 0) {
-        while (lockedFor > 0) { sub = "Too many tries. Wait ${(lockedFor + 999) / 1000} s"; delay(500); lockedFor = c.passcode.lockoutLeft() }
-        sub = "Enter your passcode"
-    }
-
-    if (resetting) {
-        PasscodeSetupScreen("Choose a new passcode", onBack = { resetting = false }) { code ->
-            scope.launch { withContext(Dispatchers.Default) { c.passcode.set(code) }; c.appLock.unlock() }
-        }
-        return
-    }
-
-    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Column(Modifier.fillMaxSize().safeDrawingPadding().padding(top = 36.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Avatar(account?.name ?: "", account?.photoFile, 84.dp)
-            Text("Welcome back${account?.name?.let { ", " + it.substringBefore(' ') } ?: ""}", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 16.dp))
-            Text(sub, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
-            Spacer(Modifier.height(22.dp))
-            PinDots(len, pin.length, shake)
+    Column(Modifier.fillMaxSize().background(c.bg).statusBarsPadding().navigationBarsPadding()) {
+        FdTopBar(title, onBack)
+        Column(Modifier.weight(1f).fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 12.dp, bottom = 18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(Modifier.size(60.dp).clip(RoundedCornerShape(20.dp)).background(c.accentSoft), contentAlignment = Alignment.Center) { FdIcon("lock", 30.dp, tint = c.accent) }
+            Text(if (first == null) "Create a passcode" else "Type it once more", style = fdText(20f, FontWeight.SemiBold), modifier = Modifier.padding(top = 16.dp, bottom = 4.dp))
+            Text(sub ?: if (first == null) "You will use it every time you open Family Docs" else "Confirm your new passcode",
+                style = fdText(13f, color = c.muted), textAlign = TextAlign.Center, modifier = Modifier.heightIn(min = 20.dp))
+            if (first == null) Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(4, 6).forEach { n -> FdChip("$n digits", length == n, { length = n; pin = "" }) }
+            }
+            Spacer(Modifier.size(24.dp))
+            FdDots(length, pin.length, shake)
             Spacer(Modifier.weight(1f))
-            PinPad(
+            FdKeypad(
                 onDigit = { d ->
-                    if (lockedFor > 0 || pin.length >= len) return@PinPad
-                    pin += d
-                    if (pin.length == len) scope.launch {
-                        when (val r = withContext(Dispatchers.Default) { c.passcode.check(pin) }) {
-                            PasscodeManager.Check.Ok -> c.appLock.unlock()
-                            is PasscodeManager.Check.Wrong -> { shake++; sub = "Wrong passcode · ${r.triesLeft} tries left"; pin = "" }
-                            is PasscodeManager.Check.LockedOut -> { shake++; pin = ""; lockedFor = r.millisLeft }
+                    if (pin.length < length) {
+                        pin += d
+                        if (pin.length == length) scope.launch {
+                            delay(140)
+                            val f = first
+                            when {
+                                f == null -> { first = pin; pin = ""; sub = null }
+                                f == pin -> onComplete(pin)
+                                else -> { shake++; pin = ""; sub = "Those didn't match. Start again."; delay(900); first = null }
+                            }
                         }
                     }
                 },
                 onDelete = { pin = pin.dropLast(1) },
-                onBiometric = if (bio) ({ biometric() }) else null,
             )
-            TextButton({ forgot = true }, Modifier.padding(vertical = 12.dp)) { Text("Forgot passcode?") }
         }
+    }
+}
+
+/** Lock screen: your picture, "Welcome back", dots, keypad (fingerprint key when enabled), Forgot passcode. */
+@Composable
+fun LockScreen(activity: FragmentActivity) {
+    val c = Fd.c
+    val app = LocalContainer.current
+    val account by app.repo.account.collectAsStateWithLifecycle(null)
+    val self by app.repo.self().collectAsStateWithLifecycle(null)
+    val settings by app.settings.state.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
+    var pin by remember { mutableStateOf("") }
+    var shake by remember { mutableIntStateOf(0) }
+    var sub by remember { mutableStateOf("Enter your passcode") }
+    var lockedFor by remember { mutableLongStateOf(app.passcode.lockoutLeft()) }
+    var forgot by remember { mutableStateOf(false) }
+    var resetting by remember { mutableStateOf(false) }
+    var forgotError by remember { mutableStateOf<String?>(null) }
+    val bio = settings.biometric && BiometricHelper.available(activity)
+    val len = app.passcode.length
+
+    fun biometric() = BiometricHelper.authenticate(activity, "Unlock Family Docs", onSuccess = { app.appLock.unlock() })
+    LaunchedEffect(Unit) { if (bio) biometric() }
+    LaunchedEffect(lockedFor > 0) {
+        while (lockedFor > 0) { sub = "Too many tries. Wait ${(lockedFor + 999) / 1000} s"; delay(500); lockedFor = app.passcode.lockoutLeft() }
+        sub = "Enter your passcode"
+    }
+
+    if (resetting) {
+        PasscodeSetupScreen("Change passcode", onBack = { resetting = false }) { code ->
+            scope.launch { withContext(Dispatchers.Default) { app.passcode.set(code) }; app.appLock.unlock() }
+        }
+        return
+    }
+
+    Column(Modifier.fillMaxSize().background(c.bg).statusBarsPadding().navigationBarsPadding().padding(start = 24.dp, end = 24.dp, top = 34.dp, bottom = 18.dp),
+        horizontalAlignment = Alignment.CenterHorizontally) {
+        FdAvatar(account?.name ?: "", 84.dp, photoFile = self?.photoFile ?: account?.photoFile, character = self?.avatar, lift = true)
+        Text("Welcome back${account?.name?.let { ", " + it.substringBefore(' ') } ?: ""}", style = fdText(20f, FontWeight.SemiBold), modifier = Modifier.padding(top = 16.dp, bottom = 4.dp))
+        Text(sub, style = fdText(13f, color = c.muted), modifier = Modifier.heightIn(min = 20.dp))
+        Spacer(Modifier.size(24.dp))
+        FdDots(len, pin.length, shake)
+        Spacer(Modifier.weight(1f))
+        FdKeypad(
+            onDigit = { d ->
+                if (lockedFor == 0L && pin.length < len) {
+                    pin += d
+                    if (pin.length == len) scope.launch {
+                        delay(140)
+                        when (val r = withContext(Dispatchers.Default) { app.passcode.check(pin) }) {
+                            PasscodeManager.Check.Ok -> app.appLock.unlock()
+                            is PasscodeManager.Check.Wrong -> { shake++; pin = ""; sub = "Wrong passcode · ${r.triesLeft} tries left" }
+                            is PasscodeManager.Check.LockedOut -> { shake++; pin = ""; lockedFor = r.millisLeft }
+                        }
+                    }
+                }
+            },
+            onDelete = { pin = pin.dropLast(1) },
+            onBiometric = if (bio) ({ biometric() }) else null,
+        )
+        Box(Modifier.padding(top = 14.dp)) { FdTextButton("Forgot passcode?", { forgot = true; forgotError = null }) }
     }
 
     if (forgot) {
         val email = account?.backupEmail.orEmpty()
-        var error by remember { mutableStateOf<String?>(null) }
-        AlertDialog(
-            onDismissRequest = { forgot = false },
-            title = { Text("Forgot your passcode?") },
-            text = { Text(error ?: "Sign in with Google as ${mask(email)} to prove it's you. Your documents stay as they are.") },
-            confirmButton = {
-                TextButton({
-                    scope.launch {
-                        c.appLock.expectExternalActivity()
-                        c.google.signIn(activity)
-                            .onSuccess { p -> if (p.email.equals(email, ignoreCase = true)) { forgot = false; resetting = true } else error = "That Google account (${p.email}) isn't the backup email for this vault." }
-                            .onFailure { error = "Sign-in didn't finish. Try again." }
-                    }
-                }) { Text("Verify with Google") }
-            },
-            dismissButton = { TextButton({ forgot = false }) { Text("Cancel") } },
-        )
+        FdSheet({ forgot = false }) {
+            SheetTitle("Forgot your passcode?",
+                forgotError ?: if (email.isNotBlank() && account?.googleLinked == true) "Sign in with Google as ${mask(email)} to prove it's you. Your documents stay as they are."
+                else "Passcode recovery needs your Google account linked (Settings → Your account). Without it the vault can't be unlocked, by design.")
+            if (account?.googleLinked == true) FdButton("Verify with Google", {
+                scope.launch {
+                    app.appLock.expectExternalActivity()
+                    app.google.signIn(activity)
+                        .onSuccess { p -> if (p.email.equals(email, ignoreCase = true)) { forgot = false; resetting = true } else forgotError = "That Google account (${p.email}) isn't the backup email for this vault." }
+                        .onFailure { forgotError = "Sign-in didn't finish. Try again." }
+                }
+            })
+            Spacer(Modifier.size(10.dp))
+            FdButton("Cancel", { forgot = false }, kind = BtnKind.Ghost)
+        }
     }
 }
 

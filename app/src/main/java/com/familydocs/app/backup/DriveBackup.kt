@@ -207,9 +207,9 @@ class DriveBackup(
     )
 
     private fun memberJson(m: MemberEntity) = JSONObject().put("id", m.id).put("name", m.name).put("relation", m.relation)
-        .put("self", m.isSelf).put("shared", m.shared).put("created", m.createdAt)
+        .put("self", m.isSelf).put("shared", m.shared).put("created", m.createdAt).put("avatar", m.avatar ?: JSONObject.NULL)
     private fun memberFromJson(j: JSONObject, photo: String?) = MemberEntity(j.getString("id"), j.getString("name"), j.getString("relation"), photo,
-        j.optBoolean("self"), j.optLong("created"), j.optBoolean("shared"))
+        j.optBoolean("self"), j.optLong("created"), j.optBoolean("shared"), if (j.isNull("avatar")) null else j.optString("avatar"))
 
     private fun pwJson(p: PasswordEntity) = JSONObject().put("id", p.id).put("member", p.memberId).put("site", p.site).put("user", p.username).put("pass", p.password).put("created", p.createdAt)
     private fun pwFromJson(j: JSONObject) = PasswordEntity(j.getString("id"), j.getString("member"), j.getString("site"), j.getString("user"), j.getString("pass"), j.optLong("created"))
