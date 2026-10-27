@@ -62,7 +62,8 @@ class OnboardingViewModel(private val c: AppContainer) : ViewModel() {
         if (name.trim().length < 2) e["name"] = "Enter your name"
         val digits = phone.filter(Char::isDigit)
         if (digits.length !in 7..12) e["phone"] = "Enter a phone number with 7–12 digits"
-        if (!googleLinked || email.isBlank()) e["email"] = "Connect your Google account to continue"
+        val googleReady = !c.google.webClientId.startsWith("REPLACE_ME")
+        if (googleReady && (!googleLinked || email.isBlank())) e["email"] = "Connect your Google account to continue"
         if (countries.isEmpty()) e["countries"] = "Pick at least one country"
         errors = e
         return e.isEmpty()
