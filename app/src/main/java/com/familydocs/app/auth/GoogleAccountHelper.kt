@@ -20,6 +20,7 @@ import java.net.URL
  * res/values/strings.xml → google_web_client_id. Also create an "Android" client with this app's SHA-1.
  */
 class GoogleAccountHelper(private val appContext: Context) {
+    val webClientId: String get() = appContext.getString(R.string.google_web_client_id)
     data class Profile(val email: String, val name: String?, val photoUrl: String?)
 
     /** [activityContext] must be an Activity so the account picker can show. */
