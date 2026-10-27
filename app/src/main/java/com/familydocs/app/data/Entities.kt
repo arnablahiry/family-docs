@@ -1,0 +1,97 @@
+package com.familydocs.app.data
+
+import androidx.room.Entity
+import androidx.room.ForeignKey
+import androidx.room.Index
+import androidx.room.PrimaryKey
+import com.familydocs.app.domain.DocField
+import org.json.JSONArray
+import org.json.JSONObject
+
+@Entity(tableName = "account")
+data class AccountEntity(
+    @PrimaryKey val id: Int = 1,
+    val name: String,
+    val countryCode: String,
+    val phone: String,
+    val backupEmail: String,
+    val photoFile: String?,
+    val googleLinked: Boolean,
+    /** Countries the family keeps documents for, e.g. "IN,GR". Drives the filter pills and "Issued by" choices. */
+    val countries: String = "IN,GR",
+)
+
+@Entity(tableName = "members")
+data class MemberEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val relation: String,
+    val photoFile: String?,
+    val isSelf: Boolean = false,
+    val createdAt: Long = System.currentTimeMillis(),
+    /** The "Common" vault: one per family, every account holder can see and edit it. */
+    val shared: Boolean = false,
+)
+
+enum class DisplayMode { ICON, FROM_FILE, CUSTOM }
+
+@Entity(
+    tableName = "documents",
+    foreignKeys = [ForeignKey(entity = MemberEntity::class, parentColumns = ["id"], childColumns = ["memberId"], onDelete = ForeignKey.CASCADE)],
+    indices = [Index("memberId")],
+)
+data class DocumentEntity(
+    @PrimaryKey val id: String,
+    val memberId: String,
+    val name: String,
+    /** Encrypted original (image or PDF) in [FileStore]. */
+    val fileId: String?,
+    val fileMime: String?,
+    val display: DisplayMode = DisplayMode.ICON,
+    /** Square thumbnail used when [display] is FROM_FILE or CUSTOM. */
+    val pictureFile: String? = null,
+    val fieldsJson: String = "[]",
+    val rawText: String = "",
+    val readByOcr: Boolean = false,
+    /** ISO alpha-2 issuing country ("IN", "GR"…), "" for none, null = work it out from the fields. */
+    val country: String? = null,
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis(),
+) {
+    val fields: List<DocField> get() = decodeFields(fieldsJson)
+    val issuer: String get() = country ?: com.familydocs.app.domain.Countries.infer(name, fields, rawText)
+}
+
+@Entity(
+    tableName = "passwords",
+    foreignKeys = [ForeignKey(entity = MemberEntity::class, parentColumns = ["id"], childColumns = ["memberId"], onDelete = ForeignKey.CASCADE)],
+    indices = [Index("memberId")],
+)
+data class PasswordEntity(
+    @PrimaryKey val id: String,
+    val memberId: String,
+    val site: String,
+    val username: String,
+    val password: String,
+    val createdAt: Long = System.currentTimeMillis(),
+)
+
+data class MemberCount(val memberId: String, val n: Int)
+
+fun encodeFields(fields: List<DocField>): String = JSONArray().apply {
+    fields.forEach { f ->
+        put(JSONObject().put("label", f.label).put("value", f.value).put("sensitive", f.sensitive).put("auto", f.auto)
+            .apply { f.verified?.let { put("verified", it) } })
+    }
+}.toString()
+
+fun decodeFields(json: String): List<DocField> = runCatching {
+    val a = JSONArray(json)
+    (0 until a.length()).map { i ->
+        val o = a.getJSONObject(i)
+        DocField(
+            label = o.optString("label"), value = o.optString("value"), sensitive = o.optBoolean("sensitive"),
+            auto = o.optBoolean("auto"), verified = if (o.has("verified")) o.getBoolean("verified") else null,
+        )
+    }
+}.getOrDefault(emptyList())

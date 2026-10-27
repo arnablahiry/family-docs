@@ -1,0 +1,60 @@
+# Builds a signed release APK on every push to main (and on demand from the Actions tab).
+# Needs these repository secrets (Settings → Secrets and variables → Actions):
+#   KEYSTORE_BASE64     base64 of familydocs-release.jks
+#   KEYSTORE_PASSWORD   the store/key password from keystore.properties
+#   GOOGLE_WEB_CLIENT_ID  the OAuth web client ID (optional; sign-in/backup need it)
+name: Build APK
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      versionCode: { description: "versionCode (must be higher than the installed one)", required: false }
+      versionName: { description: "versionName, e.g. 0.2.0", required: false }
+
+permissions:
+  contents: write   # lets the workflow publish the APK as a Release you can download on your phone
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "17" }
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Make gradlew runnable (lost when files are uploaded through the website)
+        run: chmod +x gradlew
+      - name: Signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > familydocs-release.jks
+          printf "storeFile=familydocs-release.jks\nstorePassword=%s\nkeyAlias=familydocs\nkeyPassword=%s\n" "$KEYSTORE_PASSWORD" "$KEYSTORE_PASSWORD" > keystore.properties
+      - name: Google client ID
+        env:
+          CLIENT_ID: ${{ secrets.GOOGLE_WEB_CLIENT_ID }}
+        run: |
+          if [ -n "$CLIENT_ID" ]; then sed -i "s/REPLACE_ME.apps.googleusercontent.com/$CLIENT_ID/" app/src/main/res/values/strings.xml; fi
+      - name: Test and build
+        run: |
+          VC="${{ github.event.inputs.versionCode }}"; VN="${{ github.event.inputs.versionName }}"
+          ./gradlew testDebugUnitTest assembleRelease ${VC:+-Pfamilydocs.versionCode=$VC} ${VN:+-Pfamilydocs.versionName=$VN}
+      - name: Name the APK
+        run: |
+          VN="${{ github.event.inputs.versionName }}"
+          if [ -z "$VN" ]; then VN=$(grep '^familydocs.versionName' gradle.properties | cut -d= -f2); fi
+          echo "VN=$VN" >> $GITHUB_ENV
+          cp app/build/outputs/apk/release/app-release.apk "FamilyDocs-$VN.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FamilyDocs-release-apk
+          path: FamilyDocs-*.apk
+      - name: Publish as a Release (open this page on the phone to install)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VN }}-build${{ github.run_number }}
+          name: Family Docs ${{ env.VN }} (build ${{ github.run_number }})
+          files: FamilyDocs-*.apk
+          body: Signed release APK. On the phone, open this page, download the .apk and tap it. If Family Docs is already installed it updates in place and keeps everything.
