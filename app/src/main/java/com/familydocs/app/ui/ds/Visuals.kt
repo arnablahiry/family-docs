@@ -21,6 +21,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.foundation.gestures.drag
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import kotlin.math.roundToInt
@@ -30,7 +37,6 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.key
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -210,8 +216,13 @@ fun FdDocIcon(doc: DocumentEntity, size: Dp = 54.dp) {
     FdDocTile(doc.name, size, pic)
 }
 
-/** The document's main number, shown in full (e.g. "9649 3578 0824"); otherwise its first filled detail. */
+/** Value of the field that means [key] ("subject", "specialisation", "degree"…), if filled. */
+fun DocumentEntity.fieldValue(key: String): String? =
+    fields.firstOrNull { com.familydocs.app.ocr.FieldKeys.canonical(it.label) == key && it.value.isNotBlank() }?.value?.trim()
+
+/** The document's main number, shown in full (e.g. "9649 3578 0824"); otherwise its first filled detail. Degrees: the year. */
 fun DocumentEntity.tail(): String {
+    if (DocTypes.forName(name).key == "education") fieldValue("year of passing")?.let { return it }
     val f = fields.firstOrNull { it.sensitive && it.value.isNotBlank() } ?: fields.firstOrNull { it.value.isNotBlank() }
     return when { f == null -> "No details yet"; f.sensitive -> f.value.trim(); else -> f.value.take(14) }
 }
@@ -327,7 +338,13 @@ fun FdWalletCard(
                 }
                 else -> {
                     Spacer(Modifier.weight(1f))
-                    Text(doc.tail(), style = fdText(19f, color = ink, spacing = .06f))
+                    val subject = doc.fieldValue("subject")
+                    if (t.key == "education" && subject != null) {
+                        // Degree cards: the degree, then subject and specialisation instead of a number.
+                        doc.fieldValue("degree")?.let { Text(it, style = fdText(12.5f, color = ink.copy(alpha = .85f)), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                        Text(subject, style = fdText(19f, FontWeight.SemiBold, ink), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        doc.fieldValue("specialisation")?.let { Text(it, style = fdText(13.5f, color = ink.copy(alpha = .9f)), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                    } else Text(doc.tail(), style = fdText(19f, color = ink, spacing = .06f))
                     Box(Modifier.padding(top = 8.dp)) { CardBottom(holder, until, doc.createdAt, open, ink) }
                 }
             }
@@ -461,6 +478,11 @@ fun FdWalletStack(
         val openIndex = if (dragId != null) -1 else order.indexOfFirst { it.id == expandedId }
         val tops = ArrayList<Dp>(order.size)
         order.indices.forEach { i -> tops += if (i == 0) 0.dp else tops[i - 1] + if (openIndex == i - 1) cardH + gap else strip }
+        // tap on a card: lift it, or open it when it's already lifted (looked up by id: positions change when reordering)
+        val latestTap by rememberUpdatedState<(DocumentEntity, Int) -> Unit> { d, _ ->
+            val at = order.indexOfFirst { it.id == d.id }
+            if (d.id == expandedId) onOpen(d) else onExpand(d.id, with(density) { tops.getOrNull(at)?.toPx() ?: 0f })
+        }
         val total = if (order.isEmpty()) 0.dp else tops.last() + cardH
         val height by animateDpAsState(total, tween(450, easing = FdEase), label = "stackH")
         Box(Modifier.fillMaxWidth().height(height)) {
@@ -478,29 +500,41 @@ fun FdWalletStack(
                         Modifier.zIndex(if (dragging) 1000f else i.toFloat()).then(place).height(cardH).alpha(dim)
                             .graphicsLayer { scaleX = lift; scaleY = lift }
                             .onGloballyPositioned { if (isOpen) onOpenBounds(it.boundsInRoot()) }
-                            .pointerInput(d.id, onReorder != null) {
-                                if (onReorder == null) return@pointerInput
-                                detectDragGesturesAfterLongPress(
-                                    onDragStart = {
-                                        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
-                                        onExpand(null, 0f); dragId = d.id; dragDy = 0f
-                                    },
-                                    onDrag = { change, amount -> change.consume(); dragDy += amount.y },
-                                    onDragEnd = {
-                                        val b = latestBase
-                                        val f = b.indexOfFirst { it.id == dragId }
-                                        val t = if (f >= 0) (f + (dragDy / stripPx).roundToInt()).coerceIn(0, b.lastIndex) else -1
-                                        if (f >= 0 && t != f) {
-                                            val newIds = b.map { it.id }.toMutableList().apply { add(t, removeAt(f)) }
-                                            pending = newIds
-                                            latestReorder?.invoke(newIds)
+                            // One gesture handler for both (a separate clickable would grab the touch first):
+                            // quick tap → lift / open; hold still ~0.4 s → pick up and drag; move straight away → the list scrolls.
+                            .semantics { role = Role.Button; onClick { latestTap(d, i); true } }
+                            .pointerInput(d.id) {
+                                awaitEachGesture {
+                                    val down = awaitFirstDown(requireUnconsumed = false)
+                                    var tapped = false
+                                    var moved = false
+                                    withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                                        while (true) {
+                                            val ch = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
+                                            if (!ch.pressed) { tapped = true; ch.consume(); break }
+                                            if ((ch.position - down.position).getDistance() > viewConfiguration.touchSlop) { moved = true; break }
                                         }
-                                        dragId = null; dragDy = 0f
-                                    },
-                                    onDragCancel = { dragId = null; dragDy = 0f },
-                                )
-                            }
-                            .tap { if (isOpen) onOpen(d) else onExpand(d.id, with(density) { tops[i].toPx() }) },
+                                    }
+                                    when {
+                                        tapped -> latestTap(d, i)
+                                        moved || latestReorder == null -> Unit   // a scroll (or reordering is off): leave it to the list
+                                        else -> {
+                                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                            onExpand(null, 0f); dragId = d.id; dragDy = 0f
+                                            val ended = drag(down.id) { ch -> dragDy += ch.positionChange().y; ch.consume() }
+                                            val b = latestBase
+                                            val f = b.indexOfFirst { it.id == dragId }
+                                            val t = if (f >= 0) (f + (dragDy / stripPx).roundToInt()).coerceIn(0, b.lastIndex) else -1
+                                            if (ended && f >= 0 && t != f) {
+                                                val newIds = b.map { it.id }.toMutableList().apply { add(t, removeAt(f)) }
+                                                pending = newIds
+                                                latestReorder?.invoke(newIds)
+                                            }
+                                            dragId = null; dragDy = 0f
+                                        }
+                                    }
+                                }
+                            },
                         photoFile = owner?.photoFile, character = owner?.avatar, shared = owner?.shared == true,
                     )
                 }
