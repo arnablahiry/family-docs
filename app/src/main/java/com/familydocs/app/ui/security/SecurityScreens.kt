@@ -163,7 +163,14 @@ fun LockScreen(activity: FragmentActivity) {
     val verifyGoogle = rememberGoogleConnect { r ->
         val email = account?.backupEmail.orEmpty()
         r.onSuccess { g ->
-            if (g.profile.email.equals(email, ignoreCase = true)) { forgot = false; resetting = true }
+            if (g.profile.email.equals(email, ignoreCase = true)) {
+                // Second check: the phone's own screen lock, so holding an unlocked phone with Google signed in isn't enough.
+                if (com.familydocs.app.security.BiometricHelper.deviceSecure(activity)) {
+                    app.appLock.expectExternalActivity()
+                    com.familydocs.app.security.BiometricHelper.confirmDevice(activity, onSuccess = { forgot = false; resetting = true },
+                        onFail = { forgotError = "The phone's screen lock wasn't confirmed ($it), so the passcode stays as it is." })
+                } else { forgot = false; resetting = true }
+            }
             else forgotError = "That Google account (${g.profile.email}) isn't the one this vault backs up to."
         }.onFailure { forgotError = com.familydocs.app.auth.GoogleAccountHelper.explain(it) }
     }
@@ -172,7 +179,7 @@ fun LockScreen(activity: FragmentActivity) {
         val email = account?.backupEmail.orEmpty()
         FdSheet({ forgot = false }) {
             SheetTitle("Forgot your passcode?",
-                forgotError ?: if (email.isNotBlank() && account?.googleLinked == true) "Sign in with Google as ${mask(email)} to prove it's you. Your documents stay as they are."
+                forgotError ?: if (email.isNotBlank() && account?.googleLinked == true) "Two quick checks: sign in with Google as ${mask(email)}, then unlock with this phone's own screen lock. Then you choose a new passcode. Your documents stay as they are."
                 else "Passcode recovery needs your Google account linked (Settings → Your account). Without it the vault can't be unlocked, by design.")
             if (account?.googleLinked == true) FdButton("Verify with Google", verifyGoogle)
             Spacer(Modifier.size(10.dp))

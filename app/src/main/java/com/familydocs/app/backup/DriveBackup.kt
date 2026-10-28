@@ -146,6 +146,7 @@ class DriveBackup(
         s.members.forEach { m ->
             val folder = memberFolders.getValue(m.id)
             val pws = s.passwords.filter { it.memberId == m.id }
+            // Passwords are ALWAYS sealed. "Viewable copies" only ever applies to document scans, never to logins or fields.
             drive.upsertFile(folder, "Passwords.fdenc", seal(JSONArray(pws.map { pwJson(it) }).toString().toByteArray()), OCTET,
                 mapOf(P_KIND to "passwords", P_DOC_FILE to "${m.id}:passwords"), "${pws.size} saved logins, encrypted", P_DOC_FILE)
             m.photoFile?.let { files.get(it) }?.let { photo ->

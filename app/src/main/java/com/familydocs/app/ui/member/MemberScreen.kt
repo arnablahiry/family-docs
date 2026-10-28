@@ -137,6 +137,7 @@ fun MemberScreen(memberId: String, onBack: () -> Unit, onEdit: () -> Unit, onPas
                             },
                             onOpen = open,
                             modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp),
+                            owner = m,
                         )
                     }
                 }
