@@ -522,7 +522,9 @@ fun FdWalletStack(
             return if (s >= 0f) s * .32f * i * (1f + i * .06f) else maxOf(s * .3f, -(stripPx - minGapPx)) * i
         }
         Box(Modifier.fillMaxWidth().layout { m, c ->
-            val h = (height.toPx() + extra(order.lastIndex.coerceAtLeast(0))).roundToInt().coerceAtLeast(0)
+            // Stretching grows the stack; squishing keeps its height, so the cards squeeze up towards the first one
+            // and the space opens below them (shrinking it would let the list pull everything down instead).
+            val h = (height.toPx() + maxOf(0f, extra(order.lastIndex.coerceAtLeast(0)))).roundToInt().coerceAtLeast(0)
             val p = m.measure(c.copy(minHeight = h, maxHeight = h)); layout(p.width, h) { p.place(0, 0) }
         }) {
             order.forEachIndexed { i, d ->
