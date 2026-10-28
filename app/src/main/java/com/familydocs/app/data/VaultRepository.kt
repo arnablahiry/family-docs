@@ -21,6 +21,9 @@ fun presetFor(name: String): FamilyPreset? = FAMILY_PRESET.firstOrNull { name.tr
 val CHARACTER_KEYS = listOf("char_blue_short", "char_peach_bun", "char_lilac_long", "char_mint_glasses", "char_sand_bun", "char_rose_long", "char_sky_short", "char_slate_glasses")
 
 class VaultRepository(private val dao: VaultDao, val files: FileStore) {
+    /** Called after anything the backup covers is added, changed or deleted (AppContainer queues a Drive backup). */
+    var onChanged: () -> Unit = {}
+
     val account: Flow<AccountEntity?> = dao.account()
     val members: Flow<List<MemberEntity>> = dao.members()
     val allDocuments: Flow<List<DocumentEntity>> = dao.allDocuments()
@@ -106,6 +109,7 @@ class VaultRepository(private val dao: VaultDao, val files: FileStore) {
             if (a.photoFile != photoId) { a.photoFile?.takeIf { it != old.photoFile && it != photoId }?.let { files.delete(it) } }
             dao.upsertAccount(a.copy(name = name, photoFile = photoId))
         }
+        onChanged()
     }
 
     /** First character nobody uses yet, so a new person looks different from the others. */
@@ -119,30 +123,36 @@ class VaultRepository(private val dao: VaultDao, val files: FileStore) {
         dao.documentsNow(id).forEach { it.attachments.forEach { a -> files.delete(a.id) }; files.delete(it.pictureFile) }
         dao.memberNow(id)?.let { files.delete(it.photoFile) }
         dao.deleteMember(id)
+        onChanged()
     }
 
     suspend fun saveDocument(doc: DocumentEntity, fields: List<DocField>) = withContext(Dispatchers.IO) {
         dao.upsertDocument(doc.copy(fieldsJson = encodeFields(fields), updatedAt = System.currentTimeMillis()))
+        onChanged()
     }
 
     suspend fun deleteDocument(id: String) = withContext(Dispatchers.IO) {
         dao.documentNow(id)?.let { it.attachments.forEach { a -> files.delete(a.id) }; files.delete(it.pictureFile) }
         dao.deleteDocument(id)
+        onChanged()
     }
 
-    suspend fun savePassword(memberId: String, site: String, user: String, pass: String, id: String? = null) =
+    suspend fun savePassword(memberId: String, site: String, user: String, pass: String, id: String? = null) {
         dao.upsertPassword(PasswordEntity(id ?: UUID.randomUUID().toString(), memberId, site, user, pass))
+        onChanged()
+    }
 
-    suspend fun deletePassword(id: String) = dao.deletePassword(id)
+    suspend fun deletePassword(id: String) { dao.deletePassword(id); onChanged() }
 
     // ---- events ----
     val events: Flow<List<EventEntity>> = dao.events()
     fun event(id: String) = dao.event(id)
     fun eventDocuments(eventId: String) = dao.eventDocuments(eventId)
     suspend fun eventNow(id: String) = dao.eventNow(id)
-    suspend fun saveEvent(e: EventEntity) = withContext(Dispatchers.IO) { dao.upsertEvent(e) }
+    suspend fun saveEvent(e: EventEntity) = withContext(Dispatchers.IO) { dao.upsertEvent(e); onChanged() }
     suspend fun setEventPins(id: String, pins: List<String>) = withContext(Dispatchers.IO) {
         dao.eventNow(id)?.let { dao.upsertEvent(it.copy(pins = pins.distinct().joinToString(","))) }
+        onChanged()
     }
     /** Deletes the event and the tickets/bookings added only for it. Pinned vault documents are untouched. */
     suspend fun deleteEvent(id: String) = withContext(Dispatchers.IO) {
@@ -150,6 +160,7 @@ class VaultRepository(private val dao: VaultDao, val files: FileStore) {
         dao.eventNow(id)?.let { files.delete(it.photoFile) }
         dao.deleteEventDocuments(id)
         dao.deleteEventRow(id)
+        onChanged()
     }
 
     // ---- used by backup ----

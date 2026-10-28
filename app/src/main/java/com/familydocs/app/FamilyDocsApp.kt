@@ -11,5 +11,7 @@ class FamilyDocsApp : Application() {
         super.onCreate()
         container = AppContainer(this)
         ProcessLifecycleOwner.get().lifecycle.addObserver(container.appLock)
+        // Keeps the daily backup scheduled (and moves older weekly schedules onto it).
+        if (container.settings.value.backupEnabled) com.familydocs.app.backup.BackupWorker.schedule(this, true)
     }
 }

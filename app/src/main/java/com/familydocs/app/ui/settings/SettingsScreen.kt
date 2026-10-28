@@ -217,7 +217,7 @@ fun SettingsScreen(onBack: () -> Unit, onEditAccount: () -> Unit, onChangePassco
 
             FdSectionTitle("Backup")
             FdList {
-                FdListItem("Google Drive backup", "My Drive › Family Docs · encrypted · weekly on Wi-Fi", first = true, icon = "cloud", trailing = {
+                FdListItem("Google Drive backup", "Encrypted · daily, and right after you add or change something", first = true, icon = "cloud", trailing = {
                     FdSwitch(s.backupEnabled, { v -> if (v) drive(DriveAction.Enable) else app.setBackups(false) }, "Google Drive backup")
                 })
                 BackupNowRow(s.backupEnabled, s.lastBackup, busy) { drive(DriveAction.Backup) }

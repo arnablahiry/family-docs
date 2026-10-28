@@ -18,6 +18,8 @@ import com.familydocs.app.domain.DocTypes
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -88,7 +90,10 @@ class DriveBackup(
 
     data class Report(val uploaded: Int, val unchanged: Int, val removed: Int)
 
-    suspend fun backup(accessToken: String, viewableCopies: Boolean = false, onProgress: (String) -> Unit = {}): Report = withContext(Dispatchers.IO) {
+    /** One backup at a time (the daily one, one after a change, "Back up now"), so files are never uploaded twice. */
+    private val running = Mutex()
+
+    suspend fun backup(accessToken: String, viewableCopies: Boolean = false, onProgress: (String) -> Unit = {}): Report = running.withLock { withContext(Dispatchers.IO) {
         val drive = DriveClient(accessToken)
         val s = repo.snapshot()
         val k = keyFor(drive); val key = k.key; val salt = k.id
@@ -192,7 +197,7 @@ class DriveBackup(
         drive.upsertFile(root, "Events.fdenc", seal(events.toString().toByteArray()), OCTET, mapOf(P_KIND to "events", P_DOC_FILE to "events"),
             "${s.events.size} events, encrypted", P_DOC_FILE)
         Report(uploaded, unchanged, removed)
-    }
+    } }
 
     /** Rebuilds the vault from Drive using the key in the hidden app folder. Any failure → nothing on the phone changes. */
     suspend fun restore(accessToken: String, onProgress: (String) -> Unit = {}) = withContext(Dispatchers.IO) {

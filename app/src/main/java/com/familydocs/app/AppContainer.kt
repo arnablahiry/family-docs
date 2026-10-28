@@ -20,7 +20,10 @@ class AppContainer(context: Context) {
     val crypto = CryptoManager(app)
     val files = FileStore(app, crypto)
     val db: AppDatabase by lazy { AppDatabase.build(app, crypto.databasePassphrase()) }
-    val repo: VaultRepository by lazy { VaultRepository(db.dao(), files) }
+    val repo: VaultRepository by lazy {
+        // Any change to the vault: back up to Drive a couple of minutes later (when backup is on).
+        VaultRepository(db.dao(), files).also { r -> r.onChanged = { if (settings.value.backupEnabled) BackupWorker.soon(app) } }
+    }
     val passcode = PasscodeManager(app)
     val settings = SettingsStore(app)
     val appLock = AppLock(settings)
@@ -30,7 +33,7 @@ class AppContainer(context: Context) {
     val appScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main.immediate)
     val backup: DriveBackup by lazy { DriveBackup(app, repo, files, BackupKeyStore(app, crypto)) }
 
-    /** Turns the weekly Drive backup on or off; [now] also queues one right away. */
+    /** Turns the daily Drive backup (plus one after each change) on or off; [now] also queues one right away. */
     fun setBackups(on: Boolean, now: Boolean = false) {
         settings.update { it.copy(backupEnabled = on) }
         BackupWorker.schedule(app, on)

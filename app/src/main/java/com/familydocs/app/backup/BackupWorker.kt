@@ -11,7 +11,11 @@ import androidx.work.WorkerParameters
 import com.familydocs.app.FamilyDocsApp
 import java.util.concurrent.TimeUnit
 
-/** Weekly backup on Wi-Fi. Skips quietly if Google Drive access needs the user (Settings shows "Back up now"). */
+/**
+ * Drive backup: once a day on any connection, and a couple of minutes after a document (or login, person, event)
+ * is added, changed or deleted. Only what changed is uploaded. Skips quietly if Google Drive access needs the user
+ * (Settings shows "Back up now").
+ */
 class BackupWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
     override suspend fun doWork(): Result {
         val c = (applicationContext as FamilyDocsApp).container
@@ -33,13 +37,25 @@ class BackupWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build()
             WorkManager.getInstance(context).enqueueUniqueWork("$NAME-now", androidx.work.ExistingWorkPolicy.REPLACE, req)
         }
+        /**
+         * After a change: one backup ~2 minutes later. Each new change restarts the wait, so adding several
+         * documents in a row ends in a single backup.
+         */
+        fun soon(context: Context) {
+            val req = androidx.work.OneTimeWorkRequestBuilder<BackupWorker>()
+                .setInitialDelay(2, TimeUnit.MINUTES)
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build()
+            WorkManager.getInstance(context).enqueueUniqueWork("$NAME-soon", androidx.work.ExistingWorkPolicy.REPLACE, req)
+        }
+
+        /** Daily backup. UPDATE also moves installs that had the old weekly Wi-Fi-only schedule onto this one. */
         fun schedule(context: Context, enabled: Boolean) {
             val wm = WorkManager.getInstance(context)
-            if (!enabled) { wm.cancelUniqueWork(NAME); return }
-            val req = PeriodicWorkRequestBuilder<BackupWorker>(7, TimeUnit.DAYS)
-                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.UNMETERED).setRequiresBatteryNotLow(true).build())
+            if (!enabled) { wm.cancelUniqueWork(NAME); wm.cancelUniqueWork("$NAME-soon"); return }
+            val req = PeriodicWorkRequestBuilder<BackupWorker>(1, TimeUnit.DAYS)
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).setRequiresBatteryNotLow(true).build())
                 .build()
-            wm.enqueueUniquePeriodicWork(NAME, ExistingPeriodicWorkPolicy.KEEP, req)
+            wm.enqueueUniquePeriodicWork(NAME, ExistingPeriodicWorkPolicy.UPDATE, req)
         }
     }
 }
