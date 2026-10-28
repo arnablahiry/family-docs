@@ -76,7 +76,6 @@ fun DocumentScreen(docId: String, onBack: () -> Unit, onEdit: (memberId: String)
     val doc by app.repo.document(docId).collectAsStateWithLifecycle(null)
     val d = doc ?: return
     val member by app.repo.member(d.memberId).collectAsStateWithLifecycle(null)
-    var revealed by remember { mutableStateOf(setOf<Int>()) }
     var zoomed by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     // Every page of every file (front, back, PDF pages…), in order.
@@ -123,14 +122,12 @@ fun DocumentScreen(docId: String, onBack: () -> Unit, onEdit: (memberId: String)
             else Column(Modifier.padding(horizontal = 20.dp).fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(c.surface).border(1.dp, c.line, RoundedCornerShape(18.dp))) {
                 filled.forEachIndexed { i, f ->
                     if (i > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(c.line))
-                    val show = !f.sensitive || i in revealed
                     Row(Modifier.padding(start = 14.dp, end = 6.dp, top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         Column(Modifier.weight(1f)) {
                             Text(f.label + if (f.verified == true) " ✓" else "", style = fdText(11f, color = c.muted))
-                            Text(if (show) f.value.ifBlank { "empty" } else maskValue(f.value), style = fdText(14.5f, FontWeight.SemiBold, if (f.value.isBlank()) c.muted else c.fg))
+                            // Shown in full: the app itself is behind the passcode / fingerprint.
+                            Text(f.value, style = fdText(14.5f, FontWeight.SemiBold, c.fg))
                         }
-                        if (f.sensitive) FdIconButton(if (show) "eyeoff" else "eye", { revealed = if (i in revealed) revealed - i else revealed + i },
-                            size = 36.dp, iconSize = 19.dp, tint = c.muted, description = if (show) "Hide ${f.label}" else "Show ${f.label}")
                         FdIconButton("copy", { copySensitive(context, f.label, f.value); toast.show("Copied") }, size = 36.dp, iconSize = 18.dp, tint = c.muted, description = "Copy ${f.label}")
                     }
                 }

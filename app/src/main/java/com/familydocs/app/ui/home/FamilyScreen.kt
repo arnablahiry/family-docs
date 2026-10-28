@@ -186,7 +186,7 @@ private fun search(q: String, members: List<MemberEntity>, docs: List<DocumentEn
         if (m.name.lowercase().contains(needle)) out += Hit(m, null, null)
         docs.filter { it.memberId == m.id }.forEach { d ->
             val f = d.fields.firstOrNull { it.value.lowercase().replace(" ", "").contains(compact) }
-            if (d.name.lowercase().contains(needle) || f != null) out += Hit(m, d, f?.let { "${it.label}: ${if (it.sensitive) maskValue(it.value) else it.value}" })
+            if (d.name.lowercase().contains(needle) || f != null) out += Hit(m, d, f?.let { "${it.label}: ${it.value}" })
         }
     }
     return out.take(30)

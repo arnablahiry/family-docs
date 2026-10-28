@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -199,10 +200,10 @@ fun FdDocIcon(doc: DocumentEntity, size: Dp = 54.dp) {
     FdDocTile(doc.name, size, pic)
 }
 
-/** Masked preview of the main number, e.g. "•••• 8237". */
+/** The document's main number, shown in full (e.g. "9649 3578 0824"); otherwise its first filled detail. */
 fun DocumentEntity.tail(): String {
     val f = fields.firstOrNull { it.sensitive && it.value.isNotBlank() } ?: fields.firstOrNull { it.value.isNotBlank() }
-    return when { f == null -> "No details yet"; f.sensitive -> maskValue(f.value); else -> f.value.take(14) }
+    return when { f == null -> "No details yet"; f.sensitive -> f.value.trim(); else -> f.value.take(14) }
 }
 
 fun DocumentEntity.validUntil(): String? =
@@ -284,7 +285,8 @@ fun FdWalletCard(
             Row(Modifier.height(30.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                 FdIcon(t.icon.demoName(), 20.dp, tint = ink)
                 Text(doc.name, style = fdText(15f, FontWeight.SemiBold, ink), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                Text(doc.tail(), style = fdText(11.5f, color = ink.copy(alpha = .85f)))
+                Text(doc.tail(), style = fdText(11.5f, color = ink.copy(alpha = .85f)), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = w * .45f))
                 if (doc.issuer.isNotEmpty()) FdFlag(doc.issuer, 24.dp, ring = if (paper) Color(0x1F000000) else Color.White.copy(alpha = .55f))
             }
             when (tpl) {
