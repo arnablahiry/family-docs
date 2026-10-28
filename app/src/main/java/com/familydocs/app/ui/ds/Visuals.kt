@@ -170,7 +170,7 @@ fun DocIcon.demoName(): String = when (this) {
     DocIcon.HOUSE -> "house"; DocIcon.BOLT -> "bolt"; DocIcon.FINGERPRINT -> "finger"; DocIcon.CARD -> "card"; DocIcon.PASSPORT -> "passport"
     DocIcon.PLANE -> "plane"; DocIcon.RESIDENCE -> "homeid"; DocIcon.CAR -> "car"; DocIcon.BALLOT -> "ballot"; DocIcon.SHIELD -> "shield"
     DocIcon.SYRINGE -> "syringe"; DocIcon.BANK -> "bank"; DocIcon.CAP -> "cap"; DocIcon.CERTIFICATE -> "cert"; DocIcon.MEDICAL -> "medical"
-    DocIcon.RECEIPT -> "receipt"; DocIcon.ID -> "idcard"; DocIcon.FILE -> "file"; DocIcon.KEY -> "key"
+    DocIcon.RECEIPT -> "receipt"; DocIcon.ID -> "idcard"; DocIcon.FILE -> "file"; DocIcon.KEY -> "key"; DocIcon.PEOPLE -> "people"
 }
 
 /** `.dicon`: hue-tinted rounded tile with the type icon (or the chosen picture), initials badge for unknown types. */
@@ -214,17 +214,6 @@ fun DocumentEntity.holder(fallback: String): String {
 fun fmtDate(t: Long): String = SimpleDateFormat("d MMM yyyy", Locale.UK).format(Date(t))
 
 // ---------------- wallet cards ----------------
-
-/** The muted flat illustration behind each kind of card (rendered from the demo's cardart.js). */
-fun cardArtRes(key: String): Int? = when (key) {
-    "passport" -> R.drawable.card_passport; "aadhaar" -> R.drawable.card_aadhaar; "pan" -> R.drawable.card_pan
-    "residence" -> R.drawable.card_residence; "visa" -> R.drawable.card_visa; "driving" -> R.drawable.card_driving
-    "voter" -> R.drawable.card_voter; "insurance" -> R.drawable.card_insurance; "vaccine" -> R.drawable.card_vaccine
-    "medical" -> R.drawable.card_medical; "bank" -> R.drawable.card_bank; "education" -> R.drawable.card_education
-    "certificate" -> R.drawable.card_certificate; "property" -> R.drawable.card_property; "bill" -> R.drawable.card_bill
-    "tax" -> R.drawable.card_tax; "id" -> R.drawable.card_id
-    else -> null
-}
 
 /** Minimal card templates per kind of document (demo `CARD_TPL`). */
 private enum class CardTpl { PASSPORT, ID, VISA, PAPER, MEMBER, PLAIN }
@@ -280,16 +269,11 @@ fun FdWalletCard(
                 Image(pic, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                 Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0f to lerp(Color.Black, hue, .88f), .22f to lerp(Color.Black, hue, .88f), .45f to Color(0x40050A19), 1f to Color(0xC7050A19))))
             }
-            cardArtRes(t.key) != null -> {
-                // `.wcard.art`: the type's muted illustration, a soft shade on the left for the text.
-                Image(painterResource(cardArtRes(t.key)!!), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            else -> {
+                // `.wcard.art`: sky, hills and the type's motif; national documents in their country's flag colours.
+                CardScene(t.key, t.hue, doc.issuer.takeIf { it.isNotEmpty() }, Modifier.fillMaxSize())
                 Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(
                     if (c.dark) listOf(Color(0x42000000), Color(0x1A000000)) else listOf(Color(0x290A0F1E), Color.Transparent))))
-            }
-            !paper -> {
-                // Unknown types: muted version of the type's colour.
-                val muted = lerp(hue, Color(0xFF8A8F99), .38f)
-                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(lerp(muted, Color.White, .12f), lerp(muted, Color.Black, .22f)))))
             }
         }
 
