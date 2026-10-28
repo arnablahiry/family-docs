@@ -19,6 +19,8 @@ data class Settings(
     val theme: ThemeMode = ThemeMode.SYSTEM,
     /** Also keep unencrypted copies of scans in Drive so they can be opened there. Off by default. */
     val viewableCopies: Boolean = false,
+    /** The preset family (Mom, Sister…) was offered once on this phone. */
+    val familyPresetDone: Boolean = false,
 )
 
 class SettingsStore(context: Context) {
@@ -36,13 +38,14 @@ class SettingsStore(context: Context) {
         vaultView = runCatching { VaultView.valueOf(prefs.getString("view", "CARDS")!!) }.getOrDefault(VaultView.CARDS),
         theme = runCatching { ThemeMode.valueOf(prefs.getString("theme", "SYSTEM")!!) }.getOrDefault(ThemeMode.SYSTEM),
         viewableCopies = prefs.getBoolean("viewable_copies", false),
+        familyPresetDone = prefs.getBoolean("family_preset", false),
     )
 
     fun update(block: (Settings) -> Settings) {
         val s = block(_state.value)
         prefs.edit()
             .putBoolean("biometric", s.biometric).putLong("autolock", s.autoLockMs).putBoolean("shots", s.blockScreenshots)
-            .putBoolean("backup", s.backupEnabled).putLong("last_backup", s.lastBackup).putString("view", s.vaultView.name).putString("theme", s.theme.name).putBoolean("viewable_copies", s.viewableCopies)
+            .putBoolean("backup", s.backupEnabled).putLong("last_backup", s.lastBackup).putString("view", s.vaultView.name).putString("theme", s.theme.name).putBoolean("viewable_copies", s.viewableCopies).putBoolean("family_preset", s.familyPresetDone)
             .apply()
         _state.value = s
     }

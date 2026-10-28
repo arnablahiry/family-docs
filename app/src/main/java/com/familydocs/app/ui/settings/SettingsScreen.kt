@@ -97,7 +97,7 @@ private enum class DriveAction { Enable, Backup, Restore, SignOut, Delete }
 
 /** Demo `settings`: profile card, Security, Countries, Backup, About, all as `.list` groups with `.lic` tiles and `.sw` switches. */
 @Composable
-fun SettingsScreen(onBack: () -> Unit, onEditAccount: () -> Unit, onChangePasscode: () -> Unit) {
+fun SettingsScreen(onBack: () -> Unit, onEditAccount: () -> Unit, onChangePasscode: () -> Unit, onMember: (String) -> Unit = {}, onAddMember: () -> Unit = {}) {
     val app = LocalContainer.current
     val c = Fd.c
     val context = LocalContext.current
@@ -180,6 +180,17 @@ fun SettingsScreen(onBack: () -> Unit, onEditAccount: () -> Unit, onChangePassco
                     }
                     FdIconButton("edit", onEditAccount, iconSize = 19.dp, description = "Edit account")
                 }
+            }
+
+            FdSectionTitle("Family")
+            val counts by app.repo.documentCounts.collectAsStateWithLifecycle(emptyList())
+            FdList {
+                members.forEachIndexed { i, m ->
+                    val n = counts.firstOrNull { it.memberId == m.id }?.n ?: 0
+                    FdListItem(m.name, "${if (m.shared) "Shared by everyone" else m.relation} · $n document${if (n == 1) "" else "s"}", first = i == 0,
+                        onClick = { onMember(m.id) }, leading = { FdAvatar(m.name, 38.dp, photoFile = m.photoFile, character = m.avatar, shared = m.shared) })
+                }
+                FdListItem("Add family member", "Someone else whose documents you keep", first = members.isEmpty(), icon = "plus", onClick = onAddMember)
             }
 
             FdSectionTitle("Security")

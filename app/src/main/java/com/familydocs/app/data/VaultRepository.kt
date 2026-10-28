@@ -8,6 +8,16 @@ import kotlinx.coroutines.withContext
 import java.util.UUID
 
 const val DEFAULT_SELF_AVATAR = "char_blue_short"
+/** The family this app was made for: whoever signs up as one of them gets the other two, with the right relation and picture. */
+data class FamilyPreset(val name: String, val avatar: String)
+val FAMILY_PRESET = listOf(FamilyPreset("Arnab", "char_blue_short"), FamilyPreset("Mohua", "char_peach_bun"), FamilyPreset("Teesta", "char_lilac_long"))
+private val PRESET_RELATIONS = mapOf(
+    "Arnab" to mapOf("Mohua" to "Mom", "Teesta" to "Sister"),
+    "Mohua" to mapOf("Arnab" to "Son", "Teesta" to "Daughter"),
+    "Teesta" to mapOf("Arnab" to "Brother", "Mohua" to "Mom"),
+)
+fun presetFor(name: String): FamilyPreset? = FAMILY_PRESET.firstOrNull { name.trim().substringBefore(' ').equals(it.name, ignoreCase = true) }
+
 val CHARACTER_KEYS = listOf("char_blue_short", "char_peach_bun", "char_lilac_long", "char_mint_glasses", "char_sand_bun", "char_rose_long", "char_sky_short", "char_slate_glasses")
 
 class VaultRepository(private val dao: VaultDao, val files: FileStore) {
@@ -55,6 +65,26 @@ class VaultRepository(private val dao: VaultDao, val files: FileStore) {
         // Every family gets one Common vault (rent, bills, Wi-Fi...) that all account holders share.
         if (dao.sharedNow() == null) {
             dao.upsertMember(MemberEntity(UUID.randomUUID().toString(), "Common", "Shared", photoFile = null, createdAt = 0L, shared = true))
+        }
+        if (self == null) ensureFamily()
+    }
+
+    /**
+     * Adds the rest of the preset family (see [FAMILY_PRESET]) if you are one of them and they aren't here yet,
+     * and turns a plain "Family" relation into the right one (Mom, Sister…). Never touches anyone else.
+     */
+    suspend fun ensureFamily() = withContext(Dispatchers.IO) {
+        val me = dao.selfNow() ?: return@withContext
+        val preset = presetFor(me.name) ?: return@withContext
+        val rel = PRESET_RELATIONS.getValue(preset.name)
+        val people = dao.membersNow()
+        var t = System.currentTimeMillis()
+        FAMILY_PRESET.filter { it != preset }.forEach { p ->
+            val existing = people.firstOrNull { !it.isSelf && !it.shared && it.name.trim().equals(p.name, ignoreCase = true) }
+            when {
+                existing == null -> dao.upsertMember(MemberEntity(UUID.randomUUID().toString(), p.name, rel.getValue(p.name), photoFile = null, createdAt = t++, avatar = p.avatar))
+                existing.relation == "Family" -> dao.upsertMember(existing.copy(relation = rel.getValue(p.name)))
+            }
         }
     }
 
@@ -105,9 +135,26 @@ class VaultRepository(private val dao: VaultDao, val files: FileStore) {
 
     suspend fun deletePassword(id: String) = dao.deletePassword(id)
 
+    // ---- events ----
+    val events: Flow<List<EventEntity>> = dao.events()
+    fun event(id: String) = dao.event(id)
+    fun eventDocuments(eventId: String) = dao.eventDocuments(eventId)
+    suspend fun eventNow(id: String) = dao.eventNow(id)
+    suspend fun saveEvent(e: EventEntity) = withContext(Dispatchers.IO) { dao.upsertEvent(e) }
+    suspend fun setEventPins(id: String, pins: List<String>) = withContext(Dispatchers.IO) {
+        dao.eventNow(id)?.let { dao.upsertEvent(it.copy(pins = pins.distinct().joinToString(","))) }
+    }
+    /** Deletes the event and the tickets/bookings added only for it. Pinned vault documents are untouched. */
+    suspend fun deleteEvent(id: String) = withContext(Dispatchers.IO) {
+        dao.eventDocumentsNow(id).forEach { files.delete(it.fileId); files.delete(it.pictureFile) }
+        dao.eventNow(id)?.let { files.delete(it.photoFile) }
+        dao.deleteEventDocuments(id)
+        dao.deleteEventRow(id)
+    }
+
     // ---- used by backup ----
     suspend fun snapshot() = withContext(Dispatchers.IO) {
-        Snapshot(dao.accountNow(), dao.membersNow(), dao.allDocumentsNow(), dao.allPasswordsNow())
+        Snapshot(dao.accountNow(), dao.membersNow(), dao.allDocumentsNow(), dao.allPasswordsNow(), dao.eventsNow())
     }
 
     /** Marks the account as linked to this Google account (its Drive holds the backups). */
@@ -118,7 +165,10 @@ class VaultRepository(private val dao: VaultDao, val files: FileStore) {
     /** Removes every account, person, document and password from this phone. */
     suspend fun wipe() = withContext(Dispatchers.IO) { dao.replaceAll(null, emptyList(), emptyList(), emptyList()); files.clear() }
 
-    suspend fun restore(s: Snapshot) = withContext(Dispatchers.IO) { dao.replaceAll(s.account, s.members, s.documents, s.passwords) }
+    suspend fun restore(s: Snapshot) = withContext(Dispatchers.IO) { dao.replaceAll(s.account, s.members, s.documents, s.passwords, s.events) }
 
-    data class Snapshot(val account: AccountEntity?, val members: List<MemberEntity>, val documents: List<DocumentEntity>, val passwords: List<PasswordEntity>)
+    data class Snapshot(
+        val account: AccountEntity?, val members: List<MemberEntity>, val documents: List<DocumentEntity>, val passwords: List<PasswordEntity>,
+        val events: List<EventEntity> = emptyList(),
+    )
 }

@@ -32,7 +32,7 @@ sealed interface OcrState {
     data class Failed(val message: String) : OcrState
 }
 
-class AddDocumentViewModel(private val c: AppContainer, private val appContext: Context, private val memberId: String, private val docId: String?) : ViewModel() {
+class AddDocumentViewModel(private val c: AppContainer, private val appContext: Context, private val memberId: String, private val docId: String?, private val eventId: String? = null) : ViewModel() {
     var name by mutableStateOf("")
     var display by mutableStateOf(DisplayMode.ICON)
     var preview by mutableStateOf<Bitmap?>(null); private set
@@ -148,7 +148,7 @@ class AddDocumentViewModel(private val c: AppContainer, private val appContext: 
                     else -> old?.pictureFile
                 }
             }
-            val doc = (old ?: DocumentEntity(id = UUID.randomUUID().toString(), memberId = memberId, name = name, fileId = null, fileMime = null)).copy(
+            val doc = (old ?: DocumentEntity(id = UUID.randomUUID().toString(), memberId = memberId, name = name, fileId = null, fileMime = null, eventId = eventId)).copy(
                 name = name.trim(), fileId = fileId, fileMime = if (fileId == null) null else fileMime, display = display, pictureFile = pictureId,
                 rawText = rawText, readByOcr = ocr is OcrState.Done, country = country,
             )

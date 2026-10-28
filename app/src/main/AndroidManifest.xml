@@ -3,6 +3,8 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <!-- Event reminders (asked only when you turn a reminder on) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- Lets the camera app hand the photo back (no CAMERA permission needed for ACTION_IMAGE_CAPTURE). -->
     <queries>

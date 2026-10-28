@@ -31,6 +31,8 @@ import com.familydocs.app.ui.ds.FdEase
 import com.familydocs.app.ui.ds.FdToastHost
 import com.familydocs.app.ui.ds.LocalToast
 import com.familydocs.app.ui.home.FamilyScreen
+import com.familydocs.app.ui.events.EditEventScreen
+import com.familydocs.app.ui.events.EventScreen
 import com.familydocs.app.ui.member.EditMemberScreen
 import com.familydocs.app.ui.member.MemberScreen
 import com.familydocs.app.ui.onboarding.OnboardingFlow
@@ -92,9 +94,10 @@ private fun VaultNav() {
         composable("home") {
             FamilyScreen(
                 onMember = { nav.navigate("member/$it") },
-                onAddMember = { nav.navigate("member-edit") },
                 onSettings = { nav.navigate("settings") },
                 onDocument = { nav.navigate("doc/$it") },
+                onEvent = { nav.navigate("event/$it") },
+                onNewEvent = { nav.navigate("event-edit") },
             )
         }
         composable("member/{id}", idArg) { e ->
@@ -113,15 +116,31 @@ private fun VaultNav() {
             DocumentScreen(id, onBack = { nav.popBackStack() }, onEdit = { memberId -> nav.navigate("doc-edit/$memberId?docId=$id") })
         }
         composable(
-            "doc-edit/{memberId}?docId={docId}",
-            listOf(navArgument("memberId") { type = NavType.StringType }, navArgument("docId") { type = NavType.StringType; nullable = true; defaultValue = null }),
+            "doc-edit/{memberId}?docId={docId}&eventId={eventId}",
+            listOf(
+                navArgument("memberId") { type = NavType.StringType },
+                navArgument("docId") { type = NavType.StringType; nullable = true; defaultValue = null },
+                navArgument("eventId") { type = NavType.StringType; nullable = true; defaultValue = null },
+            ),
         ) { e ->
             AddDocumentScreen(e.arguments!!.getString("memberId")!!, e.arguments?.getString("docId"), onBack = { nav.popBackStack() },
-                onSaved = { nav.popBackStack(); toast.show("Saved") })
+                onSaved = { nav.popBackStack(); toast.show("Saved") }, eventId = e.arguments?.getString("eventId"))
+        }
+        composable("event/{id}", idArg) { e ->
+            val id = e.arguments!!.getString("id")!!
+            EventScreen(id, onBack = { nav.popBackStack() }, onEdit = { nav.navigate("event-edit?id=$id") }, onDocument = { nav.navigate("doc/$it") },
+                onAddTicket = { selfId -> nav.navigate("doc-edit/$selfId?eventId=$id") })
+        }
+        composable("event-edit?id={id}", listOf(navArgument("id") { type = NavType.StringType; nullable = true; defaultValue = null })) { e ->
+            EditEventScreen(e.arguments?.getString("id"), onBack = { nav.popBackStack() }, onSaved = { id, isNew ->
+                nav.popBackStack()
+                if (isNew) nav.navigate("event/$id")
+            })
         }
         composable("passwords/{id}", idArg) { e -> PasswordsScreen(e.arguments!!.getString("id")!!, onBack = { nav.popBackStack() }) }
         composable("settings") {
-            SettingsScreen(onBack = { nav.popBackStack() }, onEditAccount = { nav.navigate("account") }, onChangePasscode = { nav.navigate("passcode") })
+            SettingsScreen(onBack = { nav.popBackStack() }, onEditAccount = { nav.navigate("account") }, onChangePasscode = { nav.navigate("passcode") },
+                onMember = { nav.navigate("member-edit?id=$it") }, onAddMember = { nav.navigate("member-edit") })
         }
         composable("account") {
             val vm = appViewModel(key = "account-edit") { OnboardingViewModel(it) }

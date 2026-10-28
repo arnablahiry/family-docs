@@ -27,6 +27,19 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
     }
 }
 
+/** v3: events (trips, birthdays, appointments) and event-only documents. Nothing existing changes. */
+val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `events` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `art` TEXT NOT NULL, `photoFile` TEXT, " +
+                "`startDay` TEXT NOT NULL, `endDay` TEXT, `people` TEXT NOT NULL, `visibleTo` TEXT NOT NULL, `pins` TEXT NOT NULL, " +
+                "`remindDays` INTEGER NOT NULL, `notes` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        )
+        db.execSQL("ALTER TABLE documents ADD COLUMN eventId TEXT")
+    }
+}
+
 val ALL_MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_1_2,
+    MIGRATION_2_3,
 )

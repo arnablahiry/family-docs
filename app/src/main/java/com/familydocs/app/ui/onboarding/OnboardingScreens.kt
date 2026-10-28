@@ -140,7 +140,11 @@ fun RegisterScreen(vm: OnboardingViewModel, onBack: () -> Unit, title: String = 
             if (showStep) Text("Step 1 of 2 · Your details", style = fdText(11.5f, color = c.muted))
 
             // ---- profile picture ----
-            FdField("Profile picture", hint = if (vm.picked == null) "Shown on the home screen and lock screen. Pick a photo or one of the characters." else null) {
+            FdField("Profile picture", hint = when {
+                vm.picked != null -> null
+                vm.googlePhoto != null && !vm.hasPhoto -> "Shown on the home screen and lock screen. The first one is your Google profile photo, or pick a character or your own photo."
+                else -> "Shown on the home screen and lock screen. Pick a photo or one of the characters."
+            }) {
                 if (vm.picked != null) {
                     FdPhotoCropper(vm.picked, vm.crop) {}
                 } else {
@@ -164,7 +168,7 @@ fun RegisterScreen(vm: OnboardingViewModel, onBack: () -> Unit, title: String = 
                     }, leading = { FdIcon("image", 16.dp, tint = c.fg) })
                     FdChip("Use a character instead", false, vm::clearPhoto)
                 }
-                if (!vm.hasPhoto) FdCharacterPicker(vm.avatar, vm::chooseCharacter)
+                if (!vm.hasPhoto) FdCharacterPicker(vm.avatar, vm::chooseCharacter, googlePhoto = vm.googlePhoto, onGooglePhoto = vm::useGooglePhoto)
             }
 
             FdField("Full name", error = e["name"]) { FdInput(vm.name, { vm.name = it }, placeholder = "Your name", icon = "user", error = "name" in e) }

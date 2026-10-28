@@ -199,9 +199,21 @@ fun cropBoxPx(): Float = with(LocalDensity.current) { (180.dp - 6.dp).toPx() }
 
 /** Row of the illustrated characters; tap one to use it as the default picture. */
 @Composable
-fun FdCharacterPicker(selected: String?, onPick: (String) -> Unit) {
+fun FdCharacterPicker(selected: String?, onPick: (String) -> Unit, googlePhoto: Bitmap? = null, onGooglePhoto: () -> Unit = {}) {
     val c = Fd.c
     LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+        // `.charb.gp`: your Google profile photo as one more option, with a small G badge.
+        if (googlePhoto != null) item {
+            Box(Modifier.size(58.dp)) {
+                Box(Modifier.size(58.dp).padding(4.dp).clip(CircleShape).clickable(onClick = onGooglePhoto)) {
+                    Image(googlePhoto.asImageBitmap(), "Your Google profile photo", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                }
+                Box(Modifier.align(Alignment.BottomEnd).offset(2.dp, 2.dp).size(20.dp).clip(CircleShape).background(c.surface).border(1.dp, c.line, CircleShape),
+                    contentAlignment = Alignment.Center) {
+                    Image(painterResource(com.familydocs.app.R.drawable.ic_google), null, Modifier.size(12.dp))
+                }
+            }
+        }
         items(CHARACTERS) { (key, res) ->
             val on = key == selected
             Box(

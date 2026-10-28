@@ -40,6 +40,7 @@ class AppContainer(context: Context) {
     /** Sign out / delete account: forget Google, then remove everything Family Docs keeps on this phone. */
     suspend fun wipeThisPhone() {
         BackupWorker.schedule(app, false)
+        androidx.work.WorkManager.getInstance(app).cancelAllWork() // event reminders too
         runCatching { google.signOut() }
         backup.keys.clear()
         repo.wipe()

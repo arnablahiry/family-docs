@@ -59,6 +59,8 @@ data class DocumentEntity(
     val country: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
+    /** Set for a ticket or booking added only for an event: it then shows in that event, not in the vault. Added in database version 3. */
+    val eventId: String? = null,
 ) {
     val fields: List<DocField> get() = decodeFields(fieldsJson)
     val issuer: String get() = country ?: com.familydocs.app.domain.Countries.infer(name, fields, rawText)
@@ -97,3 +99,33 @@ fun decodeFields(json: String): List<DocField> = runCatching {
         )
     }
 }.getOrDefault(emptyList())
+
+/**
+ * A trip or occasion (database version 3): picture, dates, who's going, who can see it, the vault documents it
+ * needs (pinned, they stay in their owner's vault) and a reminder. Its own tickets/bookings are documents with [DocumentEntity.eventId].
+ */
+@Entity(tableName = "events")
+data class EventEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    /** One of the event pictures ("mountain", "beach", "heritage"…), used when there's no photo. */
+    val art: String,
+    val photoFile: String? = null,
+    /** ISO dates, "2026-11-20". */
+    val startDay: String,
+    val endDay: String? = null,
+    /** Member ids, comma separated. */
+    val people: String = "",
+    /** Member ids who can see the event; the creator is always included. */
+    val visibleTo: String = "",
+    /** Pinned vault document ids, comma separated. */
+    val pins: String = "",
+    /** Days before [startDay] to notify, or -1 for no reminder. */
+    val remindDays: Int = -1,
+    val notes: String = "",
+    val createdAt: Long = System.currentTimeMillis(),
+) {
+    val peopleIds: List<String> get() = people.split(',').filter { it.isNotBlank() }
+    val visibleIds: List<String> get() = visibleTo.split(',').filter { it.isNotBlank() }
+    val pinIds: List<String> get() = pins.split(',').filter { it.isNotBlank() }
+}

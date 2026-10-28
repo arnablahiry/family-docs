@@ -56,7 +56,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private val RELATIONS = listOf("Spouse", "Mother", "Father", "Son", "Daughter", "Sister", "Brother", "Grandmother", "Grandfather", "Family", "Other")
+private val RELATIONS = listOf("Mom", "Dad", "Sister", "Brother", "Son", "Daughter", "Spouse", "Grandmother", "Grandfather", "Family", "Other")
 
 /** `addmember`: photo in a drag/zoom circle or an illustrated character, name, relation. Works for you, family and the Common vault. */
 @Composable
@@ -127,7 +127,7 @@ fun EditMemberScreen(memberId: String?, onBack: () -> Unit, onDeleted: () -> Uni
                     if (hasPhoto) FdChip("Remove photo", false, { picked = null; removePhoto = true }, leading = { FdIcon("trash", 16.dp, tint = c.fg) })
                 }
             }
-            if (!isShared && !hasPhoto) FdField("Or pick a character") { FdCharacterPicker(avatar) { avatar = it } }
+            if (!isShared && !hasPhoto) FdField("Or pick a character") { FdCharacterPicker(avatar, onPick = { avatar = it }) }
             if (isShared && !hasPhoto) Text("The shared vault uses the house icon until you choose a picture.", style = fdText(11.5f, color = c.muted))
 
             FdField("Name") { FdInput(name, { name = it }, placeholder = if (isShared) "Common" else "e.g. Mohua, Teesta", icon = "user") }

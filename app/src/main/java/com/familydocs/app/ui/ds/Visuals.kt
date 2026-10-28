@@ -84,6 +84,34 @@ val CHARACTERS: List<Pair<String, Int>> = listOf(
 
 fun characterRes(key: String?): Int? = CHARACTERS.firstOrNull { it.first == key }?.second
 
+// ---------------- event pictures (the demo's ART, rendered to images) ----------------
+
+/** Key (stored in EventEntity.art), label, picture. Same order as the demo's EVENT_ARTS. */
+val EVENT_ARTS: List<Triple<String, String, Int>> = listOf(
+    Triple("mountain", "Mountains", R.drawable.art_mountain),
+    Triple("beach", "Beach", R.drawable.art_beach),
+    Triple("heritage", "Heritage", R.drawable.art_heritage),
+    Triple("desert", "Desert", R.drawable.art_desert),
+    Triple("jungle", "Jungle safari", R.drawable.art_jungle),
+    Triple("trip", "Trip", R.drawable.art_trip),
+    Triple("birthday", "Birthday", R.drawable.art_birthday),
+    Triple("appointment", "Appointment", R.drawable.art_appointment),
+    Triple("health", "Doctor", R.drawable.art_health),
+    Triple("anniversary", "Anniversary", R.drawable.art_anniversary),
+    Triple("festival", "Festival", R.drawable.art_festival),
+)
+
+fun artRes(key: String?): Int = EVENT_ARTS.firstOrNull { it.first == key }?.third ?: R.drawable.art_trip
+
+/** Round event picture: the user's photo if there is one, otherwise the event's illustration. */
+@Composable
+fun FdEventPic(art: String, photoFile: String?, size: Dp, modifier: Modifier = Modifier, lift: Boolean = false) {
+    val photo = rememberVaultImage(photoFile, 700)
+    val base = modifier.size(size).then(if (lift) Modifier.shadow(10.dp, CircleShape, ambientColor = Color(0x730A0F1E), spotColor = Color(0x730A0F1E)) else Modifier).clip(CircleShape)
+    if (photo != null) Image(photo, null, base, contentScale = ContentScale.Crop)
+    else Image(painterResource(artRes(art)), null, base, contentScale = ContentScale.Crop)
+}
+
 /** The demo's fallback hues for initials avatars and unknown document types. */
 private val FALLBACK_HUES = listOf(0xFF4B6BAF, 0xFFA0573C, 0xFF2F7F7A, 0xFF7A4FB5, 0xFF8A6D1F, 0xFFB04A6E, 0xFF3F7C4B, 0xFF5868A8)
 
@@ -108,11 +136,7 @@ fun FdAvatar(
     val base = modifier.size(size).then(if (lift) Modifier.shadow(10.dp, CircleShape, ambientColor = Color(0x730A0F1E), spotColor = Color(0x730A0F1E)) else Modifier).clip(CircleShape)
     when {
         photo != null -> Image(photo, name, base.background(c.surface2), contentScale = ContentScale.Crop)
-        shared -> Box(
-            base.background(Brush.linearGradient(listOf(c.mix(c.accent, .32f, c.surface), c.mix(c.accent, .12f, c.surface)), Offset.Zero, Offset.Infinite))
-                .border(1.5.dp, c.accent.copy(alpha = .35f), CircleShape),
-            contentAlignment = Alignment.Center,
-        ) { FdIcon("house", size * .44f, 1.6f, c.mix(c.accent, .7f, c.fg), description = name) }
+        shared -> Image(painterResource(R.drawable.art_home), name, base, contentScale = ContentScale.Crop)
         characterRes(character) != null -> Image(painterResource(characterRes(character)!!), name, base, contentScale = ContentScale.Crop)
         else -> {
             val n = name.trim().ifEmpty { "?" }

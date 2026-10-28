@@ -48,6 +48,7 @@ internal val ICON_PATHS: Map<String, List<Pair<String, Boolean>>> = mapOf(
     "refresh" to listOf("M20 11a8 8 0 0 0-14.3-4.3L4 9M4 4v5h5M4 13a8 8 0 0 0 14.3 4.3L20 15M20 20v-5h-5" to false),
     "dice" to listOf("M7 4h10a3 3 0 0 1 3 3v10a3 3 0 0 1 -3 3h-10a3 3 0 0 1 -3 -3v-10a3 3 0 0 1 3 -3z" to false, "M8 9a1 1 0 1 0 2 0a1 1 0 1 0 -2 0z" to false, "M14 15a1 1 0 1 0 2 0a1 1 0 1 0 -2 0z" to false, "M14 9a1 1 0 1 0 2 0a1 1 0 1 0 -2 0z" to false, "M8 15a1 1 0 1 0 2 0a1 1 0 1 0 -2 0z" to false),
     "grid" to listOf("M6 4h3a2 2 0 0 1 2 2v3a2 2 0 0 1 -2 2h-3a2 2 0 0 1 -2 -2v-3a2 2 0 0 1 2 -2z" to false, "M15 4h3a2 2 0 0 1 2 2v3a2 2 0 0 1 -2 2h-3a2 2 0 0 1 -2 -2v-3a2 2 0 0 1 2 -2z" to false, "M6 13h3a2 2 0 0 1 2 2v3a2 2 0 0 1 -2 2h-3a2 2 0 0 1 -2 -2v-3a2 2 0 0 1 2 -2z" to false, "M15 13h3a2 2 0 0 1 2 2v3a2 2 0 0 1 -2 2h-3a2 2 0 0 1 -2 -2v-3a2 2 0 0 1 2 -2z" to false),
+    "bell" to listOf("M6.5 16.5V11a5.5 5.5 0 0 1 11 0v5.5l1.5 2h-14z" to false, "M10 20.5a2 2 0 0 0 4 0" to false),
     "house" to listOf("M3.5 11L12 4l8.5 7" to false, "M5.5 9.5V20h13V9.5" to false, "M10 20v-5.5h4V20" to false),
     "bolt" to listOf("M13 2.5L5 13.5h6l-1 8 8-11h-6z" to false),
     "sun" to listOf("M8 12a4 4 0 1 0 8 0a4 4 0 1 0 -8 0z" to false, "M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" to false),

@@ -75,7 +75,12 @@ class OnboardingViewModel(private val c: AppContainer) : ViewModel() {
 
     fun clearPhoto() { picked = null; removePhoto = true }
 
-    fun chooseCharacter(key: String) { avatar = key; picked = null; removePhoto = true }
+    /** Your Google profile photo, downloaded when you connect Google; shown as one more choice, not used by default. */
+    var googlePhoto by mutableStateOf<Bitmap?>(null); private set
+    fun useGooglePhoto() { googlePhoto?.let { picked = it; crop.zoom = 1f; crop.pan = androidx.compose.ui.geometry.Offset.Zero; removePhoto = false } }
+
+    private var avatarChosen = false
+    fun chooseCharacter(key: String) { avatar = key; avatarChosen = true; picked = null; removePhoto = true }
 
     val hasPhoto: Boolean get() = picked != null || (savedPhoto != null && !removePhoto)
 
@@ -89,9 +94,9 @@ class OnboardingViewModel(private val c: AppContainer) : ViewModel() {
             email = s.profile.email
             if (name.isBlank()) name = s.profile.name.orEmpty()
             googleLinked = true
-            // Google's photo is only a starting point: it goes into the crop circle and can be replaced.
-            if (!hasPhoto) s.profile.photoUrl?.let { c.google.downloadPhoto(it) }?.let { bytes ->
-                withContext(Dispatchers.Default) { Images.decode(bytes, 900) }?.let { picked = it; removePhoto = false }
+            // Google's photo is only offered: it shows up as an extra choice next to the characters, never applied on its own.
+            s.profile.photoUrl?.let { c.google.downloadPhoto(it) }?.let { bytes ->
+                withContext(Dispatchers.Default) { Images.decode(bytes, 900) }?.let { googlePhoto = it }
             }
             if (!editing) foundBackup = runCatching { c.backup.hasBackup(s.token) }.getOrDefault(false)
         }.onFailure { message = GoogleAccountHelper.explain(it) }
@@ -149,6 +154,7 @@ class OnboardingViewModel(private val c: AppContainer) : ViewModel() {
             c.appLock.unlock(); busy = false; onDone(); return@launch
         }
         val bytes = picked?.let { bmp -> withContext(Dispatchers.Default) { Images.jpeg(cropToSquare(bmp, crop, cropBoxPx)) } }
+        if (!editing && !avatarChosen) com.familydocs.app.data.presetFor(name)?.let { avatar = it.avatar }
         c.repo.saveAccount(name.trim(), countryCode, phone.trim(), email.trim(), bytes, googleLinked, countries,
             removePhoto = removePhoto && bytes == null, avatar = avatar)
         pendingPasscode?.let { code -> withContext(Dispatchers.Default) { c.passcode.set(code) } }

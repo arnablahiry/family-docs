@@ -187,26 +187,27 @@ fun FdInput(
     error: Boolean = false, keyboardType: KeyboardType = KeyboardType.Text, mono: Boolean = false,
     visualTransformation: VisualTransformation = VisualTransformation.None,
     leading: (@Composable RowScope.() -> Unit)? = null, trailing: (@Composable RowScope.() -> Unit)? = null,
+    singleLine: Boolean = true,
 ) {
     val c = Fd.c
     val source = remember { MutableInteractionSource() }
     val focused by source.collectIsFocusedAsState()
     val border by animateColorAsState(if (error) c.danger else if (focused) c.primary else c.line, tween(150), label = "inpBorder")
     BasicTextField(
-        value = value, onValueChange = onValueChange, singleLine = true, interactionSource = source,
+        value = value, onValueChange = onValueChange, singleLine = singleLine, minLines = if (singleLine) 1 else 3, interactionSource = source,
         textStyle = fdText(15f, color = c.fg), cursorBrush = SolidColor(c.primary), visualTransformation = visualTransformation,
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
         modifier = modifier.fillMaxWidth(),
         decorationBox = { inner ->
             Row(
                 Modifier.fillMaxWidth().heightIn(min = 50.dp).clip(RoundedCornerShape(14.dp)).background(c.surface)
-                    .border(1.5.dp, border, RoundedCornerShape(14.dp)).padding(horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    .border(1.5.dp, border, RoundedCornerShape(14.dp)).padding(horizontal = 12.dp, vertical = if (singleLine) 0.dp else 12.dp),
+                verticalAlignment = if (singleLine) Alignment.CenterVertically else Alignment.Top, horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 if (icon != null) FdIcon(icon, 20.dp, tint = c.muted)
                 leading?.invoke(this)
-                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                    if (value.isEmpty()) Text(placeholder, style = fdText(15f, color = c.muted), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Box(Modifier.weight(1f), contentAlignment = if (singleLine) Alignment.CenterStart else Alignment.TopStart) {
+                    if (value.isEmpty()) Text(placeholder, style = fdText(15f, color = c.muted), maxLines = if (singleLine) 1 else 3, overflow = TextOverflow.Ellipsis)
                     inner()
                 }
                 trailing?.invoke(this)

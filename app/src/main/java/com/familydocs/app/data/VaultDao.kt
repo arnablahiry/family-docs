@@ -27,7 +27,7 @@ interface VaultDao {
     @Transaction
     suspend fun deleteMember(id: String) { deleteDocumentsOf(id); deletePasswordsOf(id); deleteMemberRow(id) }
 
-    @Query("SELECT * FROM documents WHERE memberId = :memberId ORDER BY createdAt") fun documents(memberId: String): Flow<List<DocumentEntity>>
+    @Query("SELECT * FROM documents WHERE memberId = :memberId AND eventId IS NULL ORDER BY createdAt") fun documents(memberId: String): Flow<List<DocumentEntity>>
     @Query("SELECT * FROM documents ORDER BY createdAt") fun allDocuments(): Flow<List<DocumentEntity>>
     @Query("SELECT * FROM documents") suspend fun allDocumentsNow(): List<DocumentEntity>
     @Query("SELECT * FROM documents WHERE memberId = :memberId") suspend fun documentsNow(memberId: String): List<DocumentEntity>
@@ -35,7 +35,19 @@ interface VaultDao {
     @Query("SELECT * FROM documents WHERE id = :id") suspend fun documentNow(id: String): DocumentEntity?
     @Upsert suspend fun upsertDocument(d: DocumentEntity)
     @Query("DELETE FROM documents WHERE id = :id") suspend fun deleteDocument(id: String)
-    @Query("SELECT memberId, COUNT(*) AS n FROM documents GROUP BY memberId") fun documentCounts(): Flow<List<MemberCount>>
+    @Query("SELECT memberId, COUNT(*) AS n FROM documents WHERE eventId IS NULL GROUP BY memberId") fun documentCounts(): Flow<List<MemberCount>>
+
+    // ---- events ----
+    @Query("SELECT * FROM events ORDER BY startDay") fun events(): Flow<List<EventEntity>>
+    @Query("SELECT * FROM events") suspend fun eventsNow(): List<EventEntity>
+    @Query("SELECT * FROM events WHERE id = :id") fun event(id: String): Flow<EventEntity?>
+    @Query("SELECT * FROM events WHERE id = :id") suspend fun eventNow(id: String): EventEntity?
+    @Upsert suspend fun upsertEvent(e: EventEntity)
+    @Query("DELETE FROM events WHERE id = :id") suspend fun deleteEventRow(id: String)
+    @Query("SELECT * FROM documents WHERE eventId = :eventId ORDER BY createdAt") fun eventDocuments(eventId: String): Flow<List<DocumentEntity>>
+    @Query("SELECT * FROM documents WHERE eventId = :eventId") suspend fun eventDocumentsNow(eventId: String): List<DocumentEntity>
+    @Query("DELETE FROM documents WHERE eventId = :eventId") suspend fun deleteEventDocuments(eventId: String)
+    @Query("DELETE FROM events") suspend fun clearEvents()
 
     @Query("SELECT * FROM passwords WHERE memberId = :memberId ORDER BY site COLLATE NOCASE") fun passwords(memberId: String): Flow<List<PasswordEntity>>
     @Query("SELECT * FROM passwords") suspend fun allPasswordsNow(): List<PasswordEntity>
@@ -48,12 +60,13 @@ interface VaultDao {
     @Query("DELETE FROM account") suspend fun clearAccount()
 
     @Transaction
-    suspend fun replaceAll(account: AccountEntity?, members: List<MemberEntity>, docs: List<DocumentEntity>, pws: List<PasswordEntity>) {
-        clearDocuments(); clearPasswords(); clearMembers()
+    suspend fun replaceAll(account: AccountEntity?, members: List<MemberEntity>, docs: List<DocumentEntity>, pws: List<PasswordEntity>, events: List<EventEntity> = emptyList()) {
+        clearEvents(); clearDocuments(); clearPasswords(); clearMembers()
         clearAccount()
         account?.let { upsertAccount(it) }
         members.forEach { upsertMember(it) }
         docs.forEach { upsertDocument(it) }
         pws.forEach { upsertPassword(it) }
+        events.forEach { upsertEvent(it) }
     }
 }

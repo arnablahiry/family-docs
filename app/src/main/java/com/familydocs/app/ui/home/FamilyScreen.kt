@@ -59,19 +59,28 @@ import com.familydocs.app.ui.ds.FdIconButton
 import com.familydocs.app.ui.ds.FdInput
 import com.familydocs.app.ui.ds.dashedBorder
 import com.familydocs.app.ui.ds.fdText
+import com.familydocs.app.domain.Events
+import com.familydocs.app.ui.events.EventsStrip
+import com.familydocs.app.ui.events.visibleTo
 import kotlinx.coroutines.launch
 import java.util.Calendar
 
 @Composable
-fun FamilyScreen(onMember: (String) -> Unit, onAddMember: () -> Unit, onSettings: () -> Unit, onDocument: (String) -> Unit) {
+fun FamilyScreen(onMember: (String) -> Unit, onSettings: () -> Unit, onDocument: (String) -> Unit, onEvent: (String) -> Unit, onNewEvent: () -> Unit) {
     val app = LocalContainer.current
     val c = Fd.c
     val account by app.repo.account.collectAsStateWithLifecycle(null)
     val members by app.repo.members.collectAsStateWithLifecycle(emptyList())
     val docs by app.repo.allDocuments.collectAsStateWithLifecycle(emptyList())
     val counts by app.repo.documentCounts.collectAsStateWithLifecycle(emptyList())
+    val allEvents by app.repo.events.collectAsStateWithLifecycle(emptyList())
+    // Once per phone: if you're one of the preset family, the other two appear with the right relation and picture.
+    LaunchedEffect(Unit) {
+        if (!app.settings.value.familyPresetDone) { app.repo.ensureFamily(); app.settings.update { it.copy(familyPresetDone = true) } }
+    }
     var query by rememberSaveable { mutableStateOf("") }
     val self = members.firstOrNull { it.isSelf }
+    val events = allEvents.filter { it.visibleTo(self?.id) && Events.isCurrent(it.startDay, it.endDay) }
     val full = GridItemSpan(2)
 
     LazyVerticalGrid(
@@ -123,12 +132,8 @@ fun FamilyScreen(onMember: (String) -> Unit, onAddMember: () -> Unit, onSettings
                     FdAvatar(m.name, 132.dp, photoFile = m.photoFile, character = m.avatar, shared = m.shared, lift = true)
                 }
             }
-            item {
-                Person("Add another", null, onAddMember,
-                    Modifier.padding(start = if (members.size % 2 == 0) 24.dp else 0.dp, end = if (members.size % 2 == 1) 24.dp else 0.dp, bottom = 30.dp), muted = true) {
-                    Box(Modifier.size(132.dp).dashedBorder(c.line, 2.dp, 66.dp), contentAlignment = Alignment.Center) { FdIcon("plus", 40.dp, 1.5f, c.muted) }
-                }
-            }
+            // The + is for events now; adding family members lives in Settings › Family.
+            item(span = { full }) { EventsStrip(events, onEvent, onNewEvent) }
         }
     }
 }

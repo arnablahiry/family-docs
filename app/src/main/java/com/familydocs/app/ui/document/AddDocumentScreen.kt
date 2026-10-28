@@ -83,13 +83,14 @@ import com.familydocs.app.ui.ds.fdText
 import java.io.File
 
 @Composable
-fun AddDocumentScreen(memberId: String, docId: String?, onBack: () -> Unit, onSaved: () -> Unit) {
+fun AddDocumentScreen(memberId: String, docId: String?, onBack: () -> Unit, onSaved: () -> Unit, eventId: String? = null) {
     val app = LocalContainer.current
     val c = Fd.c
     val context = LocalContext.current
     val toast = LocalToast.current
-    val vm = appViewModel(key = "doc-$memberId-$docId") { AddDocumentViewModel(it, context.applicationContext, memberId, docId) }
+    val vm = appViewModel(key = "doc-$memberId-$docId-$eventId") { AddDocumentViewModel(it, context.applicationContext, memberId, docId, eventId) }
     val member by app.repo.member(memberId).collectAsStateWithLifecycle(null)
+    val event by (eventId?.let { app.repo.event(it) } ?: kotlinx.coroutines.flow.flowOf(null)).collectAsStateWithLifecycle(null)
     val account by app.repo.account.collectAsStateWithLifecycle(null)
     var cameraUri by rememberSaveable { mutableStateOf<String?>(null) }
     var showRaw by remember { mutableStateOf(false) }
@@ -108,7 +109,7 @@ fun AddDocumentScreen(memberId: String, docId: String?, onBack: () -> Unit, onSa
     Column(Modifier.fillMaxSize().background(c.bg).statusBarsPadding().imePadding()) {
         FdTopBar(if (docId == null) "Add document" else "Edit document", onBack) { FdTextButton("Save", ::save, enabled = !vm.saving) }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-            Text("For ${member?.name.orEmpty()}", style = fdText(11.5f, color = c.muted), modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 8.dp))
+            Text(event?.let { "For ${it.name} · only shows in this event" } ?: "For ${member?.name.orEmpty()}", style = fdText(11.5f, color = c.muted), modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 8.dp))
 
             // ---------- File ----------
             FdSectionTitle("File", Modifier.padding(top = 0.dp))

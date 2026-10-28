@@ -173,6 +173,11 @@ class DriveBackup(
             .put("documents", JSONArray(s.documents.map { JSONObject().put("id", it.id).put("member", it.memberId) }))
         drive.upsertFile(root, "Family Docs vault.fdenc", seal(index.toString().toByteArray()), OCTET, mapOf(P_KIND to "index", P_DOC_FILE to "index"),
             "Index of people and documents, encrypted", P_DOC_FILE)
+        // Events (dates, who's going, who can see them, pinned documents, reminder, notes, photo): one encrypted file.
+        // Their tickets/bookings are ordinary documents (with an event id) inside the creator's folder above.
+        val events = JSONArray(s.events.map { e -> eventJson(e).put("photo", e.photoFile?.let { files.get(it) }?.let { android.util.Base64.encodeToString(it, android.util.Base64.NO_WRAP) } ?: JSONObject.NULL) })
+        drive.upsertFile(root, "Events.fdenc", seal(events.toString().toByteArray()), OCTET, mapOf(P_KIND to "events", P_DOC_FILE to "events"),
+            "${s.events.size} events, encrypted", P_DOC_FILE)
         Report(uploaded, unchanged, removed)
     }
 
@@ -214,18 +219,27 @@ class DriveBackup(
         rootChildren.firstOrNull { it.props[P_KIND] == "account-photo" }?.let { f -> accountPhoto = "account-photo"; blobs["account-photo"] = open(drive.download(f.id)) }
         val account = index.optJSONObject("account")?.let { accountFromJson(it, accountPhoto) }
 
+        val events = rootChildren.firstOrNull { it.props[P_KIND] == "events" }?.let { f ->
+            val arr = JSONArray(String(open(drive.download(f.id))))
+            (0 until arr.length()).map { i ->
+                val j = arr.getJSONObject(i)
+                val photoId = if (j.isNull("photo")) null else ("e-" + j.getString("id")).also { blobs[it] = android.util.Base64.decode(j.getString("photo"), android.util.Base64.NO_WRAP) }
+                eventFromJson(j, photoId)
+            }
+        }.orEmpty()
         // Everything downloaded and decrypted: only now replace what's on the phone.
         onProgress("Saving to this phone…")
         files.clear()
         blobs.forEach { (id, data) -> files.put(data, id) }
-        repo.restore(VaultRepository.Snapshot(account, memberEntities, docs, pws))
+        repo.restore(VaultRepository.Snapshot(account, memberEntities, docs, pws, events))
         keys.install(k)
+        com.familydocs.app.events.EventReminders.rescheduleAll(context, events)
     }
 
     // ---------- JSON ----------
     private fun docJson(d: DocumentEntity) = JSONObject().put("id", d.id).put("member", d.memberId).put("name", d.name).put("mime", d.fileMime ?: JSONObject.NULL)
         .put("display", d.display.name).put("fields", d.fieldsJson).put("text", d.rawText).put("ocr", d.readByOcr)
-        .put("country", d.country ?: JSONObject.NULL).put("created", d.createdAt).put("updated", d.updatedAt)
+        .put("country", d.country ?: JSONObject.NULL).put("created", d.createdAt).put("updated", d.updatedAt).put("event", d.eventId ?: JSONObject.NULL)
 
     private fun docFromJson(j: JSONObject, fileId: String?, picId: String?) = DocumentEntity(
         id = j.getString("id"), memberId = j.getString("member"), name = j.getString("name"), fileId = fileId,
@@ -233,6 +247,16 @@ class DriveBackup(
         display = runCatching { DisplayMode.valueOf(j.getString("display")) }.getOrDefault(DisplayMode.ICON), pictureFile = picId,
         fieldsJson = j.optString("fields", "[]"), rawText = j.optString("text"), readByOcr = j.optBoolean("ocr"),
         country = if (j.isNull("country")) null else j.optString("country"), createdAt = j.optLong("created"), updatedAt = j.optLong("updated"),
+        eventId = if (!j.has("event") || j.isNull("event")) null else j.getString("event"),
+    )
+
+    private fun eventJson(e: com.familydocs.app.data.EventEntity) = JSONObject().put("id", e.id).put("name", e.name).put("art", e.art)
+        .put("start", e.startDay).put("end", e.endDay ?: JSONObject.NULL).put("people", e.people).put("visible", e.visibleTo).put("pins", e.pins)
+        .put("remind", e.remindDays).put("notes", e.notes).put("created", e.createdAt)
+    private fun eventFromJson(j: JSONObject, photo: String?) = com.familydocs.app.data.EventEntity(
+        id = j.getString("id"), name = j.getString("name"), art = j.optString("art", "trip"), photoFile = photo, startDay = j.getString("start"),
+        endDay = if (j.isNull("end")) null else j.optString("end"), people = j.optString("people"), visibleTo = j.optString("visible"),
+        pins = j.optString("pins"), remindDays = j.optInt("remind", -1), notes = j.optString("notes"), createdAt = j.optLong("created"),
     )
 
     private fun memberJson(m: MemberEntity) = JSONObject().put("id", m.id).put("name", m.name).put("relation", m.relation)
