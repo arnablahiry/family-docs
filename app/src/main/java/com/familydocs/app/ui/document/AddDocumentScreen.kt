@@ -190,6 +190,7 @@ fun AddDocumentScreen(memberId: String, docId: String?, onBack: () -> Unit, onSa
             FdSectionTitle("Display picture")
             Row(Modifier.padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 DisplayOption("Auto icon", vm.display == DisplayMode.ICON, true, Modifier.weight(1f), { vm.display = DisplayMode.ICON }) { FdDocTile(vm.name) }
+                val preview = vm.preview
                 DisplayOption("From file", vm.display == DisplayMode.FROM_FILE, preview != null, Modifier.weight(1f), { vm.display = DisplayMode.FROM_FILE }) {
                     FdDocTile(vm.name, picture = preview?.asImageBitmap(), iconOverride = if (preview == null) "image" else null, hueOverride = 0xFF888888)
                 }
