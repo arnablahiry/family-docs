@@ -6,6 +6,10 @@ import android.graphics.Paint
 import android.graphics.RectF
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
+import androidx.compose.ui.draw.shadow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.tween
@@ -71,22 +75,49 @@ import kotlin.math.max
 
 // ---------------- passcode ----------------
 
-/** `.dots`: 13px rings that fill and grow slightly; change [shakeKey] to shake (wrong code). */
+/**
+ * `.dots`: 13px rings that fill and grow slightly; change [shakeKey] to shake (wrong code).
+ * [success]: the unlock moment (demo `.dots.ok`): dots turn green, gather into the middle and a check pops in.
+ */
 @Composable
-fun FdDots(length: Int, filled: Int, shakeKey: Int) {
+fun FdDots(length: Int, filled: Int, shakeKey: Int, success: Boolean = false) {
     val c = Fd.c
     val shake = remember { Animatable(0f) }
+    val gather = remember { Animatable(0f) }
+    val check = remember { Animatable(0f) }
     LaunchedEffect(shakeKey) { if (shakeKey > 0) shake.animateTo(0f, keyframes { durationMillis = 400; -8f at 80; 8f at 160; -8f at 240; 8f at 320; 0f at 400 }) }
-    Row(
-        Modifier.height(16.dp).offset { IntOffset(shake.value.dp.roundToPx(), 0) }.semantics { contentDescription = "$filled of $length digits entered" },
-        horizontalArrangement = Arrangement.spacedBy(18.dp), verticalAlignment = Alignment.CenterVertically,
-    ) {
-        repeat(length) { i ->
-            val on = i < filled
-            val fill by animateColorAsState(if (on) c.primary else Color.Transparent, tween(150), label = "dot")
-            val s by animateFloatAsState(if (on) 1.1f else 1f, tween(150), label = "dotScale")
-            Box(Modifier.size(13.dp).scale(s).clip(CircleShape).background(fill).border(1.5.dp, if (on) c.primary else c.muted, CircleShape))
+    LaunchedEffect(success) {
+        if (!success) { gather.snapTo(0f); check.snapTo(0f); return@LaunchedEffect }
+        launch { gather.animateTo(1f, tween(340, easing = CubicBezierEasing(.55f, 0f, .25f, 1f))) }
+        delay(220)
+        check.animateTo(1f, tween(440, easing = CubicBezierEasing(.3f, 1.6f, .5f, 1f)))
+    }
+    Box(contentAlignment = Alignment.Center) {
+        Row(
+            Modifier.height(16.dp).offset { IntOffset(shake.value.dp.roundToPx(), 0) }.semantics { contentDescription = if (success) "Unlocked" else "$filled of $length digits entered" },
+            horizontalArrangement = Arrangement.spacedBy(18.dp), verticalAlignment = Alignment.CenterVertically,
+        ) {
+            repeat(length) { i ->
+                val on = i < filled
+                val ok = success
+                val fill by animateColorAsState(if (ok) c.ok else if (on) c.primary else Color.Transparent, tween(if (ok) 100 else 150), label = "dot")
+                val s by animateFloatAsState(if (on) 1.1f else 1f, tween(150), label = "dotScale")
+                val toCenter = ((length - 1) / 2f - i) * 31f // 13dp dot + 18dp gap
+                Box(
+                    Modifier.size(13.dp).graphicsLayer {
+                        val g = gather.value
+                        translationX = toCenter * g * density
+                        val k = s * (1f - .65f * g); scaleX = k; scaleY = k
+                        alpha = 1f - ((g - .4f) / .6f).coerceIn(0f, 1f)
+                    }.clip(CircleShape).background(fill).border(1.5.dp, if (ok) c.ok else if (on) c.primary else c.muted, CircleShape),
+                )
+            }
         }
+        if (success) Box(
+            Modifier.size(36.dp).graphicsLayer { val v = check.value; scaleX = .3f + .7f * v; scaleY = .3f + .7f * v; alpha = v.coerceIn(0f, 1f) }
+                .shadow(8.dp, CircleShape, ambientColor = c.ok, spotColor = c.ok).clip(CircleShape).background(c.ok),
+            contentAlignment = Alignment.Center,
+        ) { FdIcon("check", 21.dp, 2.6f, Color.White) }
     }
 }
 
@@ -199,7 +230,7 @@ fun cropBoxPx(): Float = with(LocalDensity.current) { (180.dp - 6.dp).toPx() }
 
 /** Row of the illustrated characters; tap one to use it as the default picture. */
 @Composable
-fun FdCharacterPicker(selected: String?, onPick: (String) -> Unit, googlePhoto: Bitmap? = null, onGooglePhoto: () -> Unit = {}) {
+fun FdCharacterPicker(selected: String?, onPick: (String) -> Unit, googlePhoto: Bitmap? = null, onGooglePhoto: () -> Unit = {}, keys: List<String>? = null) {
     val c = Fd.c
     LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
         // `.charb.gp`: your Google profile photo as one more option, with a small G badge.
@@ -214,7 +245,7 @@ fun FdCharacterPicker(selected: String?, onPick: (String) -> Unit, googlePhoto: 
                 }
             }
         }
-        items(CHARACTERS) { (key, res) ->
+        items(if (keys == null) CHARACTERS else CHARACTERS.filter { it.first in keys }) { (key, res) ->
             val on = key == selected
             Box(
                 Modifier.size(58.dp).border(2.5.dp, if (on) c.primary else Color.Transparent, CircleShape).padding(4.dp).clip(CircleShape).clickable { onPick(key) },

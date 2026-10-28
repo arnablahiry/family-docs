@@ -168,7 +168,8 @@ fun RegisterScreen(vm: OnboardingViewModel, onBack: () -> Unit, title: String = 
                     }, leading = { FdIcon("image", 16.dp, tint = c.fg) })
                     FdChip("Use a character instead", false, vm::clearPhoto)
                 }
-                if (!vm.hasPhoto) FdCharacterPicker(vm.avatar, vm::chooseCharacter, googlePhoto = vm.googlePhoto, onGooglePhoto = vm::useGooglePhoto)
+                if (!vm.hasPhoto) FdCharacterPicker(vm.avatar, vm::chooseCharacter, googlePhoto = vm.googlePhoto, onGooglePhoto = vm::useGooglePhoto,
+                    keys = com.familydocs.app.data.FAMILY_PRESET.map { it.avatar }) // only the family's own three
             }
 
             FdField("Full name", error = e["name"]) { FdInput(vm.name, { vm.name = it }, placeholder = "Your name", icon = "user", error = "name" in e) }

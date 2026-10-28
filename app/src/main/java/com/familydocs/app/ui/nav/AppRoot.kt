@@ -14,6 +14,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavBackStackEntry
@@ -72,7 +73,10 @@ fun AppRoot(activity: FragmentActivity) {
             null -> Unit
             false -> OnboardingFlow(onDone = { c.appLock.unlock() })
             true -> {
-                VaultNav()
+                val unlocking by c.appLock.unlocking.collectAsStateWithLifecycle()
+                val settle by androidx.compose.animation.core.animateFloatAsState(if (locked && !unlocking) 0f else 1f,
+                    if (locked && !unlocking) androidx.compose.animation.core.snap<Float>() else tween<Float>(660, easing = FdEase), label = "settle")
+                Box(Modifier.fillMaxSize().graphicsLayer { val k = .94f + .06f * settle; scaleX = k; scaleY = k; alpha = settle }) { VaultNav() }
                 if (locked) LockScreen(activity)
             }
         }

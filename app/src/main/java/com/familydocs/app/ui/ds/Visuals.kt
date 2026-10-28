@@ -215,16 +215,24 @@ fun fmtDate(t: Long): String = SimpleDateFormat("d MMM yyyy", Locale.UK).format(
 
 // ---------------- wallet cards ----------------
 
+/** The muted flat illustration behind each kind of card (rendered from the demo's cardart.js). */
+fun cardArtRes(key: String): Int? = when (key) {
+    "passport" -> R.drawable.card_passport; "aadhaar" -> R.drawable.card_aadhaar; "pan" -> R.drawable.card_pan
+    "residence" -> R.drawable.card_residence; "visa" -> R.drawable.card_visa; "driving" -> R.drawable.card_driving
+    "voter" -> R.drawable.card_voter; "insurance" -> R.drawable.card_insurance; "vaccine" -> R.drawable.card_vaccine
+    "medical" -> R.drawable.card_medical; "bank" -> R.drawable.card_bank; "education" -> R.drawable.card_education
+    "certificate" -> R.drawable.card_certificate; "property" -> R.drawable.card_property; "bill" -> R.drawable.card_bill
+    "tax" -> R.drawable.card_tax; "id" -> R.drawable.card_id
+    else -> null
+}
+
 /** Minimal card templates per kind of document (demo `CARD_TPL`). */
 private enum class CardTpl { PASSPORT, ID, VISA, PAPER, MEMBER, PLAIN }
 
 private fun cardTpl(key: String): CardTpl = when (key) {
     "passport" -> CardTpl.PASSPORT
     "aadhaar", "pan", "residence", "driving", "voter", "id" -> CardTpl.ID
-    "visa" -> CardTpl.VISA
-    "property", "bill", "certificate", "education", "medical", "tax", "vaccine" -> CardTpl.PAPER
-    "insurance", "bank" -> CardTpl.MEMBER
-    else -> CardTpl.PLAIN
+    else -> CardTpl.PLAIN // every card now sits on its illustration; only passports and ID cards change layout
 }
 
 /** Passport-style machine-readable lines, built from the holder and the masked number (never the full number). */
@@ -272,22 +280,17 @@ fun FdWalletCard(
                 Image(pic, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                 Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0f to lerp(Color.Black, hue, .88f), .22f to lerp(Color.Black, hue, .88f), .45f to Color(0x40050A19), 1f to Color(0xC7050A19))))
             }
-            !paper -> Box(Modifier.fillMaxSize().background(Brush.radialGradient(listOf(glow, Color.Transparent), center = Offset(wPx, 0f), radius = wPx * .66f)))
-        }
-        when (tpl) {
-            CardTpl.PASSPORT -> CardGlobe(Modifier.align(Alignment.TopEnd).padding(end = w * .07f).offset(y = maxHeight * .21f).size(w * .37f))
-            CardTpl.ID, CardTpl.MEMBER -> Box(Modifier.align(Alignment.BottomEnd).offset(x = w * .05f, y = maxHeight * .12f).size(w * .44f).alpha(.10f)) {
-                FdIcon(t.icon.demoName(), w * .44f, 1.2f, Color.White)
+            cardArtRes(t.key) != null -> {
+                // `.wcard.art`: the type's muted illustration, a soft shade on the left for the text.
+                Image(painterResource(cardArtRes(t.key)!!), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(
+                    if (c.dark) listOf(Color(0x42000000), Color(0x1A000000)) else listOf(Color(0x290A0F1E), Color.Transparent))))
             }
-            CardTpl.VISA -> {
-                CardWaves(Modifier.fillMaxSize())
-                CardStamp(doc.issuer, Modifier.align(Alignment.TopEnd).padding(end = w * .08f).offset(y = maxHeight * .27f).size(w * .23f))
+            !paper -> {
+                // Unknown types: muted version of the type's colour.
+                val muted = lerp(hue, Color(0xFF8A8F99), .38f)
+                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(lerp(muted, Color.White, .12f), lerp(muted, Color.Black, .22f)))))
             }
-            CardTpl.PAPER -> {
-                Box(Modifier.fillMaxHeight().width(6.dp).background(hue))
-                CardFold(c.mix(hue, .06f, c.bg), c.mix(hue, .24f, c.surface), Modifier.align(Alignment.TopEnd).size(26.dp))
-            }
-            CardTpl.PLAIN -> Unit
         }
 
         // ---- content ----

@@ -18,8 +18,13 @@ class AppLock(private val settings: SettingsStore) : DefaultLifecycleObserver {
     private var backgroundAt = 0L
     private var externalUntil = 0L
 
-    fun unlock() { _locked.value = false }
-    fun lock() { _locked.value = true }
+    private val _unlocking = MutableStateFlow(false)
+    /** True while the unlock animation lifts the lock screen away (the vault underneath settles in). */
+    val unlocking: StateFlow<Boolean> = _unlocking.asStateFlow()
+
+    fun unlock() { _locked.value = false; _unlocking.value = false }
+    fun lock() { _unlocking.value = false; _locked.value = true }
+    fun beginUnlock() { _unlocking.value = true }
 
     fun expectExternalActivity(windowMs: Long = 5 * 60_000) {
         externalUntil = SystemClock.elapsedRealtime() + windowMs

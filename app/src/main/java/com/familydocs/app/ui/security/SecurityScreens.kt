@@ -26,6 +26,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.border
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -117,8 +120,24 @@ fun LockScreen(activity: FragmentActivity) {
     var forgotError by remember { mutableStateOf<String?>(null) }
     val bio = settings.biometric && BiometricHelper.available(activity)
     val len = app.passcode.length
+    // Unlock animation (demo unlockAnim): dots → check, a soft ring around your picture, keypad drops away,
+    // then the whole lock screen lifts and fades while the family screen settles in underneath.
+    var success by remember { mutableStateOf(false) }
+    val fadeOut = remember { androidx.compose.animation.core.Animatable(0f) }
+    val ring = remember { androidx.compose.animation.core.Animatable(0f) }
+    val lift = remember { androidx.compose.animation.core.Animatable(0f) }
+    LaunchedEffect(success) {
+        if (!success) return@LaunchedEffect
+        launch { delay(100); ring.animateTo(1f, androidx.compose.animation.core.tween(750)) }
+        launch { delay(120); fadeOut.animateTo(1f, androidx.compose.animation.core.tween(320, easing = androidx.compose.animation.core.CubicBezierEasing(.5f, 0f, .75f, 0f))) }
+        delay(620)
+        app.appLock.beginUnlock()
+        lift.animateTo(1f, androidx.compose.animation.core.tween(500, easing = androidx.compose.animation.core.CubicBezierEasing(.55f, 0f, .75f, .2f)))
+        app.appLock.unlock()
+    }
+    fun unlocked() { if (!success) { pin = "1".repeat(len); success = true } }
 
-    fun biometric() = BiometricHelper.authenticate(activity, "Unlock Family Docs", onSuccess = { app.appLock.unlock() })
+    fun biometric() = BiometricHelper.authenticate(activity, "Unlock Family Docs", onSuccess = { unlocked() })
     LaunchedEffect(Unit) { if (bio) biometric() }
     LaunchedEffect(lockedFor > 0) {
         while (lockedFor > 0) { sub = "Too many tries. Wait ${(lockedFor + 999) / 1000} s"; delay(500); lockedFor = app.passcode.lockoutLeft() }
@@ -132,22 +151,29 @@ fun LockScreen(activity: FragmentActivity) {
         return
     }
 
-    Column(Modifier.fillMaxSize().background(c.bg).statusBarsPadding().navigationBarsPadding().padding(start = 24.dp, end = 24.dp, top = 34.dp, bottom = 18.dp),
+    Column(Modifier.fillMaxSize().graphicsLayer {
+            val v = lift.value; translationY = -size.height * .08f * v; scaleX = 1f + .03f * v; scaleY = 1f + .03f * v; alpha = 1f - v
+        }.background(c.bg).statusBarsPadding().navigationBarsPadding().padding(start = 24.dp, end = 24.dp, top = 34.dp, bottom = 18.dp),
         horizontalAlignment = Alignment.CenterHorizontally) {
-        FdAvatar(account?.name ?: "", 84.dp, photoFile = self?.photoFile ?: account?.photoFile, character = self?.avatar, lift = true)
+        Box(contentAlignment = Alignment.Center) {
+            if (success) Box(Modifier.size(90.dp).graphicsLayer { val v = ring.value; val k = .92f + .53f * v; scaleX = k; scaleY = k; alpha = (.9f * (1f - v)).coerceAtLeast(0f) }
+                .border(2.dp, c.ok, CircleShape))
+            FdAvatar(account?.name ?: "", 84.dp, photoFile = self?.photoFile ?: account?.photoFile, character = self?.avatar, lift = true)
+        }
         Text("Welcome back${account?.name?.let { ", " + it.substringBefore(' ') } ?: ""}", style = fdText(20f, FontWeight.SemiBold), modifier = Modifier.padding(top = 16.dp, bottom = 4.dp))
-        Text(sub, style = fdText(13f, color = c.muted), modifier = Modifier.heightIn(min = 20.dp))
+        Text(sub, style = fdText(13f, color = c.muted), modifier = Modifier.heightIn(min = 20.dp).graphicsLayer { alpha = 1f - fadeOut.value })
         Spacer(Modifier.size(24.dp))
-        FdDots(len, pin.length, shake)
+        FdDots(len, pin.length, shake, success)
         Spacer(Modifier.weight(1f))
+        Column(Modifier.graphicsLayer { val v = fadeOut.value; alpha = 1f - v; translationY = 16.dp.toPx() * v }, horizontalAlignment = Alignment.CenterHorizontally) {
         FdKeypad(
             onDigit = { d ->
-                if (lockedFor == 0L && pin.length < len) {
+                if (!success && lockedFor == 0L && pin.length < len) {
                     pin += d
                     if (pin.length == len) scope.launch {
                         delay(140)
                         when (val r = withContext(Dispatchers.Default) { app.passcode.check(pin) }) {
-                            PasscodeManager.Check.Ok -> app.appLock.unlock()
+                            PasscodeManager.Check.Ok -> unlocked()
                             is PasscodeManager.Check.Wrong -> { shake++; pin = ""; sub = "Wrong passcode · ${r.triesLeft} tries left" }
                             is PasscodeManager.Check.LockedOut -> { shake++; pin = ""; lockedFor = r.millisLeft }
                         }
@@ -158,6 +184,7 @@ fun LockScreen(activity: FragmentActivity) {
             onBiometric = if (bio) ({ biometric() }) else null,
         )
         Box(Modifier.padding(top = 14.dp)) { FdTextButton("Forgot passcode?", { forgot = true; forgotError = null }) }
+        }
     }
 
     val verifyGoogle = rememberGoogleConnect { r ->

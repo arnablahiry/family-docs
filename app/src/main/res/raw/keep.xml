@@ -1,4 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Flags and characters are looked up by name at run time, so resource shrinking must keep them. -->
 <resources xmlns:tools="http://schemas.android.com/tools"
-    tools:keep="@drawable/flag_*,@drawable/char_*,@drawable/welcome_art_*,@drawable/art_*,@font/abaddon_*" />
+    tools:keep="@drawable/flag_*,@drawable/char_*,@drawable/welcome_art_*,@drawable/art_*,@drawable/card_*,@font/abaddon_*" />
