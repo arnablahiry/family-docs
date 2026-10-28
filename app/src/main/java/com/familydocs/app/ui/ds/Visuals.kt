@@ -522,16 +522,14 @@ fun FdWalletStack(
             order.forEachIndexed { i, d ->
                 key(d.id) {
                     val dragging = d.id == dragId
-                    // While a card is held the others make room with a soft, bouncy spring.
-                    val top by animateDpAsState(tops[i], if (dragId != null) spring(dampingRatio = .62f, stiffness = 420f) else tween(450, easing = FdEase), label = "cardTop")
+                    // While a card is held the others glide out of its way (smooth, no bounce).
+                    val top by animateDpAsState(tops[i], if (dragId != null) tween(260, easing = FdEase) else tween(450, easing = FdEase), label = "cardTop")
                     val isOpen = i == openIndex
                     val dim by animateFloatAsState(if (openIndex >= 0 && !isOpen) .45f else 1f, tween(300), label = "cardDim")
-                    // Picked up: pops a little bigger; the cards behind ease back a touch.
-                    val lift by animateFloatAsState(if (dragging) 1.05f else if (dragId != null) .985f else 1f, spring(dampingRatio = .5f, stiffness = 500f), label = "cardLift")
-                    // Tilts slightly in the direction it's moved, like it has weight; settles when the finger rests.
-                    var tiltTarget by remember { mutableFloatStateOf(0f) }
-                    LaunchedEffect(dragging) { while (dragging) { kotlinx.coroutines.delay(40); tiltTarget *= .72f } ; tiltTarget = 0f }
-                    val tilt by animateFloatAsState(if (dragging) tiltTarget else 0f, spring(dampingRatio = .45f, stiffness = 260f), label = "cardTilt")
+                    // Pick-up: a springy pop to 1.05×; put-down: back to 1× with a soft squash as it lands
+                    // (the under-damped spring dips just below 1 before settling).
+                    val lift by animateFloatAsState(if (dragging) 1.05f else 1f,
+                        if (dragging) spring(dampingRatio = .48f, stiffness = 520f) else spring(dampingRatio = .4f, stiffness = 330f), label = "cardLift")
                     // On drop the card glides from the finger into its slot and lands with a small overshoot.
                     var dropOffset by remember { mutableFloatStateOf(0f) }
                     // The held card follows the finger; the others slide to make room.
@@ -540,7 +538,7 @@ fun FdWalletStack(
                     FdWalletCard(
                         d, holderFallback, isOpen || dragging,
                         Modifier.zIndex(if (dragging) 1000f else i.toFloat()).then(place).height(cardH).alpha(dim)
-                            .graphicsLayer { scaleX = lift; scaleY = lift; rotationZ = tilt }
+                            .graphicsLayer { scaleX = lift; scaleY = lift }
                             .onGloballyPositioned { if (isOpen) onOpenBounds(it.boundsInRoot()) }
                             // One gesture handler for both (a separate clickable would grab the touch first):
                             // quick tap → lift / open; hold still ~0.4 s → pick up and drag; move straight away → the list scrolls.
@@ -563,12 +561,8 @@ fun FdWalletStack(
                                         else -> {
                                             haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
                                             onExpand(null, 0f); dragId = d.id; dragDy = 0f
-                                            val ended = drag(down.id) { ch ->
-                                                val dy = ch.positionChange().y
-                                                dragDy += dy
-                                                tiltTarget = (tiltTarget * .7f + dy * .45f).coerceIn(-4f, 4f)
-                                                ch.consume()
-                                            }
+                                            // follows the finger exactly while held: no tilt, no wobble
+                                            val ended = drag(down.id) { ch -> dragDy += ch.positionChange().y; ch.consume() }
                                             val b = latestBase
                                             val f = b.indexOfFirst { it.id == dragId }
                                             val t = if (f >= 0) (f + (dragDy / stripPx).roundToInt()).coerceIn(0, b.lastIndex) else -1
