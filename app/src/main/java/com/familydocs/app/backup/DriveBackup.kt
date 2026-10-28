@@ -83,12 +83,24 @@ class DriveBackup(
 
     /** Permanently removes the Family Docs folder and the backup key from this Google account's Drive. */
     suspend fun deleteFromDrive(accessToken: String) = withContext(Dispatchers.IO) {
+        forgetManifest()
         val drive = DriveClient(accessToken)
         drive.findByProp(P_ROOT, "1")?.let { drive.delete(it.id) }
         drive.appDataDelete(KEY_FILE)
     }
 
     data class Report(val uploaded: Int, val unchanged: Int, val removed: Int)
+
+    /**
+     * What the last successful backup put in Drive (a fingerprint per document, a hash of each passwords file, photo,
+     * events and index), kept on the phone. Anything unchanged since then is skipped without even asking Drive.
+     * A full check against Drive runs once a week, and whenever the Drive folder or the backup key is different.
+     */
+    private val manifest = context.getSharedPreferences("drive_backup_manifest", Context.MODE_PRIVATE)
+    private fun sha(b: ByteArray) = java.security.MessageDigest.getInstance("SHA-256").digest(b).joinToString("") { "%02x".format(it) }
+    private fun sha(s: String) = sha(s.toByteArray())
+    /** After sign out / delete account: the next backup checks everything again. */
+    fun forgetManifest() = manifest.edit().clear().apply()
 
     /** One backup at a time (the daily one, one after a change, "Back up now"), so files are never uploaded twice. */
     private val running = Mutex()
@@ -103,6 +115,13 @@ class DriveBackup(
         onProgress("Preparing Family Docs folder…")
         val root = drive.folder("Family Docs", null, mapOf(P_ROOT to "1"), "Encrypted backup made by the Family Docs app for $selfName. Open it with the app.")
         var uploaded = 0; var unchanged = 0; var removed = 0
+        val keyId = android.util.Base64.encodeToString(salt, android.util.Base64.NO_WRAP)
+        val now = System.currentTimeMillis()
+        val full = manifest.getString("root", null) != root || manifest.getString("key", null) != keyId ||
+            now - manifest.getLong("full_at", 0L) > 7L * 24 * 60 * 60 * 1000
+        val seen = mutableMapOf<String, String>()
+        /** true when [k] is unchanged since the last backup (and this isn't the weekly full check); remembers [v] either way */
+        fun same(k: String, v: String): Boolean { seen[k] = v; return !full && manifest.getString(k, null) == v }
 
         val memberFolders = mutableMapOf<String, String>()
         s.members.forEach { m ->
@@ -111,6 +130,8 @@ class DriveBackup(
         }
 
         s.documents.forEachIndexed { i, d ->
+            // Unchanged since the last backup: nothing to ask Drive, nothing to upload.
+            if (same("doc:${d.id}", "${d.updatedAt}:${d.attachments.size}:$viewableCopies")) { unchanged++; return@forEachIndexed }
             onProgress("Backing up ${i + 1} of ${s.documents.size}: ${d.name}")
             val parent = memberFolders[d.memberId] ?: return@forEachIndexed
             val type = DocTypes.forName(d.name)
@@ -165,23 +186,26 @@ class DriveBackup(
             val folder = memberFolders.getValue(m.id)
             val pws = s.passwords.filter { it.memberId == m.id }
             // Passwords are ALWAYS sealed. "Viewable copies" only ever applies to document scans, never to logins or fields.
-            drive.upsertFile(folder, "Passwords.fdenc", seal(JSONArray(pws.map { pwJson(it) }).toString().toByteArray()), OCTET,
+            val pwJsonText = JSONArray(pws.map { pwJson(it) }).toString()
+            if (!same("pw:${m.id}", sha(pwJsonText))) drive.upsertFile(folder, "Passwords.fdenc", seal(pwJsonText.toByteArray()), OCTET,
                 mapOf(P_KIND to "passwords", P_DOC_FILE to "${m.id}:passwords"), "${pws.size} saved logins, encrypted", P_DOC_FILE)
-            m.photoFile?.let { files.get(it) }?.let { photo ->
+            if (!same("photo:${m.id}", m.photoFile ?: "-")) m.photoFile?.let { files.get(it) }?.let { photo ->
                 drive.upsertFile(folder, "photo.jpg.fdenc", seal(photo), OCTET, mapOf(P_KIND to "photo", P_DOC_FILE to "${m.id}:photo"), null, P_DOC_FILE)
             }
         }
-        s.account?.photoFile?.let { files.get(it) }?.let { photo ->
+        if (!same("account-photo", s.account?.photoFile ?: "-")) s.account?.photoFile?.let { files.get(it) }?.let { photo ->
             drive.upsertFile(root, "account-photo.jpg.fdenc", seal(photo), OCTET, mapOf(P_KIND to "account-photo", P_DOC_FILE to "account:photo"), null, P_DOC_FILE)
         }
 
         // Anything in Drive that no longer exists on the phone goes to Drive's bin (recoverable for 30 days).
         onProgress("Tidying up…")
         val liveDocs = s.documents.map { it.id }.toSet(); val liveMembers = s.members.map { it.id }.toSet()
-        memberFolders.values.forEach { mf ->
+        // only when documents or people were added/removed since the last backup
+        if (!same("tidy", sha((liveDocs.sorted() + "|" + liveMembers.sorted()).joinToString(",")))) memberFolders.values.forEach { mf ->
             drive.children(mf).filter { it.mime == DriveClient.FOLDER && it.props[P_DOC] != null && it.props[P_DOC] !in liveDocs }.forEach { drive.trash(it.id); removed++ }
         }
-        drive.children(root).filter { it.mime == DriveClient.FOLDER && it.props[P_MEMBER] != null && it.props[P_MEMBER] !in liveMembers }.forEach { drive.trash(it.id); removed++ }
+        if (manifest.getString("tidy", null) != seen["tidy"] || full)
+            drive.children(root).filter { it.mime == DriveClient.FOLDER && it.props[P_MEMBER] != null && it.props[P_MEMBER] !in liveMembers }.forEach { drive.trash(it.id); removed++ }
 
         onProgress("Writing index…")
         val index = JSONObject()
@@ -189,13 +213,22 @@ class DriveBackup(
             .put("account", s.account?.let { accountJson(it) } ?: JSONObject.NULL)
             .put("members", JSONArray(s.members.map { memberJson(it) }))
             .put("documents", JSONArray(s.documents.map { JSONObject().put("id", it.id).put("member", it.memberId).put("order", it.sortOrder ?: JSONObject.NULL) }))
-        drive.upsertFile(root, "Family Docs vault.fdenc", seal(index.toString().toByteArray()), OCTET, mapOf(P_KIND to "index", P_DOC_FILE to "index"),
+        val indexText = index.toString()
+        if (!same("index", sha(indexText))) drive.upsertFile(root, "Family Docs vault.fdenc", seal(indexText.toByteArray()), OCTET, mapOf(P_KIND to "index", P_DOC_FILE to "index"),
             "Index of people and documents, encrypted", P_DOC_FILE)
         // Events (dates, who's going, who can see them, pinned documents, reminder, notes, photo): one encrypted file.
         // Their tickets/bookings are ordinary documents (with an event id) inside the creator's folder above.
-        val events = JSONArray(s.events.map { e -> eventJson(e).put("photo", e.photoFile?.let { files.get(it) }?.let { android.util.Base64.encodeToString(it, android.util.Base64.NO_WRAP) } ?: JSONObject.NULL) })
-        drive.upsertFile(root, "Events.fdenc", seal(events.toString().toByteArray()), OCTET, mapOf(P_KIND to "events", P_DOC_FILE to "events"),
-            "${s.events.size} events, encrypted", P_DOC_FILE)
+        val eventsKey = sha(JSONArray(s.events.map { e -> eventJson(e).put("photo", e.photoFile ?: JSONObject.NULL) }).toString())
+        if (!same("events", eventsKey)) {
+            val events = JSONArray(s.events.map { e -> eventJson(e).put("photo", e.photoFile?.let { files.get(it) }?.let { android.util.Base64.encodeToString(it, android.util.Base64.NO_WRAP) } ?: JSONObject.NULL) })
+            drive.upsertFile(root, "Events.fdenc", seal(events.toString().toByteArray()), OCTET, mapOf(P_KIND to "events", P_DOC_FILE to "events"),
+                "${s.events.size} events, encrypted", P_DOC_FILE)
+        }
+        // Everything went up: remember it for next time (only what still exists, so the record never grows stale).
+        manifest.edit().clear().apply {
+            putString("root", root); putString("key", keyId); putLong("full_at", if (full) now else manifest.getLong("full_at", now))
+            seen.forEach { (k, v) -> putString(k, v) }
+        }.apply()
         Report(uploaded, unchanged, removed)
     } }
 

@@ -48,6 +48,7 @@ class AppContainer(context: Context) {
         androidx.work.WorkManager.getInstance(app).cancelAllWork() // event reminders too
         runCatching { google.signOut() }
         backup.keys.clear()
+        backup.forgetManifest() // the next backup (on any account) checks everything again
         repo.wipe()
         settings.reset()
         passcode.clear() // last: this is what switches the app back to the welcome screen
