@@ -1,5 +1,21 @@
 package com.familydocs.app.ui.home
 
+import com.familydocs.app.ui.ds.FdEase
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.border
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.animateFloatAsState
@@ -70,36 +86,52 @@ import java.util.Calendar
 fun FamilyScreen(onMember: (String) -> Unit, onSettings: () -> Unit, onDocument: (String) -> Unit, onEvent: (String) -> Unit, onNewEvent: () -> Unit) {
     val app = LocalContainer.current
     val c = Fd.c
-    val account by app.repo.account.collectAsStateWithLifecycle(null)
-    val members by app.repo.members.collectAsStateWithLifecycle(emptyList())
-    val docs by app.repo.allDocuments.collectAsStateWithLifecycle(emptyList())
-    val counts by app.repo.documentCounts.collectAsStateWithLifecycle(emptyList())
-    val allEvents by app.repo.events.collectAsStateWithLifecycle(emptyList())
+    val groups by app.repo.groups.collectAsStateWithLifecycle(emptyList())
+    val gid by app.repo.groupId.collectAsStateWithLifecycle()
     // Once per phone: if you're one of the preset family, the other two appear with the right relation and picture.
     LaunchedEffect(Unit) {
         if (!app.settings.value.familyPresetDone) { app.repo.ensureFamily(); app.settings.update { it.copy(familyPresetDone = true) } }
     }
+    var sheet by remember { mutableStateOf<String?>(null) } // "create" | "join"
+    Column(Modifier.fillMaxSize().background(c.bg).statusBarsPadding()) {
+        GroupHeader(groups, gid, onSettings, onCreate = { sheet = "create" }, onJoin = { sheet = "join" })
+        // Switching groups: the old page fades back a touch, the new one rises in and settles.
+        AnimatedContent(gid, transitionSpec = {
+            (fadeIn(tween(280, delayMillis = 90)) + slideInVertically(tween(380, easing = FdEase)) { it / 16 } + scaleIn(tween(380, easing = FdEase), initialScale = .97f)) togetherWith
+                (fadeOut(tween(150)) + scaleOut(tween(200), targetScale = .985f))
+        }, label = "groupSwitch") { g -> GroupHome(g, onMember, onSettings, onDocument, onEvent, onNewEvent) }
+    }
+    when (sheet) {
+        "create" -> GroupSheet("New group", "Its own people, Common vault, events and code. You're in every group.", "Group name, e.g. Flatmates", "Create group",
+            onDismiss = { sheet = null }) { name -> app.selectGroup(app.repo.createGroup(name).id); null }
+        "join" -> GroupSheet("Join a group", "Enter the group's code.", "Group code, e.g. K7#-Q2@-XM4", "Join",
+            onDismiss = { sheet = null }) { code ->
+            val g = app.repo.groupByCode(code)
+            if (g != null) { app.selectGroup(g.id); null }
+            else "No group with this code on this phone. Groups in your Google backup come back when you restore it on a new phone; joining a group from someone else's account isn't available yet."
+        }
+    }
+}
+
+/** One group's home: its people, search and events (keyed by group, so the switch animation shows the right page). */
+@Composable
+private fun GroupHome(g: String?, onMember: (String) -> Unit, onSettings: () -> Unit, onDocument: (String) -> Unit, onEvent: (String) -> Unit, onNewEvent: () -> Unit) {
+    val app = LocalContainer.current
+    val c = Fd.c
+    val account by app.repo.account.collectAsStateWithLifecycle(null)
+    val members by remember(g) { app.repo.membersOf(g) }.collectAsStateWithLifecycle(emptyList())
+    val docs by remember(g) { app.repo.documentsOf(g) }.collectAsStateWithLifecycle(emptyList())
+    val counts by app.repo.documentCounts.collectAsStateWithLifecycle(emptyList())
+    val allEvents by remember(g) { app.repo.eventsOf(g) }.collectAsStateWithLifecycle(emptyList())
     var query by rememberSaveable { mutableStateOf("") }
     val self = members.firstOrNull { it.isSelf }
     val events = allEvents.filter { it.visibleTo(self?.id) && Events.isCurrent(it.startDay, it.endDay) }
     val full = GridItemSpan(2)
 
     LazyVerticalGrid(
-        GridCells.Fixed(2), Modifier.fillMaxSize().background(c.bg).statusBarsPadding(),
+        GridCells.Fixed(2), Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 36.dp), horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        // ---- header: wordmark, theme switch, lock, your picture ----
-        item(span = { full }) {
-            Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Family Docs", style = fdText(22f, FontWeight.Bold, spacing = .01f), modifier = Modifier.weight(1f))
-                ThemeButton()
-                FdIconButton("lock", { app.appLock.lock() }, iconSize = 21.dp, description = "Lock app")
-                Box(Modifier.clip(CircleShape).clickable(onClick = onSettings)) {
-                    FdAvatar(account?.name ?: "", 34.dp, photoFile = self?.photoFile ?: account?.photoFile, character = self?.avatar)
-                }
-            }
-        }
         item(span = { full }) {
             Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp)) {
                 Text("${greeting()}, ${account?.name?.substringBefore(' ').orEmpty()}", style = fdText(14f, color = c.muted))
@@ -205,3 +237,84 @@ private fun greeting(): String = when (Calendar.getInstance().get(Calendar.HOUR_
     in 0..4 -> "Up late"; in 5..11 -> "Good morning"; in 12..16 -> "Good afternoon"; else -> "Good evening"
 }
 
+/**
+ * Home header: the group's name (always, instead of "Family Docs"), its code underneath (fainter) and a ▾ to switch
+ * groups (or ＋ to add one when there are none). The name and code roll to the new group; the menu unfolds below.
+ */
+@Composable
+private fun GroupHeader(groups: List<com.familydocs.app.data.GroupEntity>, gid: String?, onSettings: () -> Unit, onCreate: () -> Unit, onJoin: () -> Unit) {
+    val app = LocalContainer.current
+    val c = Fd.c
+    val account by app.repo.account.collectAsStateWithLifecycle(null)
+    val self by app.repo.self().collectAsStateWithLifecycle(null)
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    val toast = com.familydocs.app.ui.ds.LocalToast.current
+    var open by remember { mutableStateOf(false) }
+    val current = groups.firstOrNull { it.id == gid }
+    val turn by animateFloatAsState(if (open) 180f else 0f, spring(dampingRatio = .6f, stiffness = 380f), label = "groupChevron")
+    Column {
+        Row(Modifier.padding(start = 14.dp, end = 20.dp, top = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).clickable { if (groups.isEmpty()) onCreate() else open = !open }
+                .padding(horizontal = 6.dp, vertical = 2.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    AnimatedContent(current?.name ?: "Family Docs", Modifier.weight(1f, fill = false), transitionSpec = {
+                        (slideInVertically(tween(320, easing = FdEase)) { it / 2 } + fadeIn(tween(240, 60))) togetherWith (slideOutVertically(tween(260)) { -it / 2 } + fadeOut(tween(160)))
+                    }, label = "groupName") { name -> Text(name, style = fdText(22f, FontWeight.Bold, spacing = .01f), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                    if (groups.isEmpty()) FdIcon("plus", 18.dp, tint = c.muted, description = "Add a group")
+                    else FdIcon("chev", 16.dp, tint = c.muted, description = "Switch group", modifier = Modifier.graphicsLayer { rotationZ = 90f + turn })
+                }
+                current?.let { cur ->
+                    AnimatedContent(cur.code, transitionSpec = {
+                        (slideInVertically(tween(320, 40, FdEase)) { it } + fadeIn(tween(240, 100))) togetherWith (slideOutVertically(tween(220)) { -it } + fadeOut(tween(140)))
+                    }, label = "groupCode") { code -> Text(code, style = fdText(11.5f, color = c.fg.copy(alpha = .45f), spacing = .08f)) }
+                }
+            }
+            ThemeButton()
+            FdIconButton("lock", { app.appLock.lock() }, iconSize = 21.dp, description = "Lock app")
+            Box(Modifier.clip(CircleShape).clickable(onClick = onSettings)) {
+                FdAvatar(account?.name ?: "", 34.dp, photoFile = self?.photoFile ?: account?.photoFile, character = self?.avatar)
+            }
+        }
+        AnimatedVisibility(open, enter = expandVertically(spring(dampingRatio = .82f, stiffness = 420f), expandFrom = Alignment.Top) + fadeIn(tween(200)),
+            exit = shrinkVertically(tween(220, easing = FdEase), shrinkTowards = Alignment.Top) + fadeOut(tween(150))) {
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp).fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(c.surface)
+                .border(1.dp, c.line, RoundedCornerShape(18.dp)).padding(vertical = 4.dp)) {
+                groups.forEach { g ->
+                    Row(Modifier.fillMaxWidth().clickable { open = false; if (g.id != gid) app.selectGroup(g.id) }.padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(g.name, style = fdText(15f, if (g.id == gid) FontWeight.Bold else FontWeight.Medium))
+                            Text(g.code, style = fdText(11.5f, color = c.fg.copy(alpha = .45f), spacing = .08f))
+                        }
+                        if (g.id == gid) {
+                            FdIconButton("copy", { clipboard.setText(androidx.compose.ui.text.AnnotatedString(g.code)); toast.show("Code copied") }, size = 34.dp, iconSize = 17.dp,
+                                tint = c.muted, description = "Copy code")
+                            FdIcon("check", 18.dp, tint = c.accent)
+                        }
+                    }
+                }
+                Box(Modifier.padding(horizontal = 14.dp).fillMaxWidth().height(1.dp).background(c.line))
+                Row(Modifier.fillMaxWidth().clickable { open = false; onCreate() }.padding(horizontal = 14.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)) { FdIcon("plus", 18.dp, tint = c.muted); Text("New group", style = fdText(14f)) }
+                Row(Modifier.fillMaxWidth().clickable { open = false; onJoin() }.padding(horizontal = 14.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)) { FdIcon("key", 18.dp, tint = c.muted); Text("Join with code", style = fdText(14f)) }
+            }
+        }
+    }
+}
+
+/** New group / join with code: one field, one button; [onSubmit] returns an error to show, or null when done. */
+@Composable
+private fun GroupSheet(title: String, text: String, placeholder: String, action: String, onDismiss: () -> Unit, onSubmit: suspend (String) -> String?) {
+    val scope = rememberCoroutineScope()
+    var value by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+    com.familydocs.app.ui.ds.FdSheet(onDismiss) {
+        com.familydocs.app.ui.ds.SheetTitle(title, text)
+        FdInput(value, { value = it; error = null }, placeholder = placeholder)
+        error?.let { Text(it, style = fdText(12.5f, color = Fd.c.danger), modifier = Modifier.padding(top = 8.dp)) }
+        com.familydocs.app.ui.ds.FdButton(action, { scope.launch { error = onSubmit(value); if (error == null) onDismiss() } }, Modifier.padding(top = 14.dp), enabled = value.isNotBlank())
+        Spacer(Modifier.height(12.dp))
+    }
+}

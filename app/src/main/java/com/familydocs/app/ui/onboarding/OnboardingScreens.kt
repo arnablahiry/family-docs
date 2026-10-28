@@ -49,6 +49,7 @@ import com.familydocs.app.security.BiometricHelper
 import com.familydocs.app.ui.components.LocalContainer
 import com.familydocs.app.ui.components.appViewModel
 import com.familydocs.app.ui.components.rememberGoogleConnect
+import com.familydocs.app.ui.ds.FdSegmented
 import com.familydocs.app.ui.ds.FdBanner
 import com.familydocs.app.ui.ds.FdProgress
 import com.familydocs.app.ui.ds.FdTextButton
@@ -210,6 +211,15 @@ fun RegisterScreen(vm: OnboardingViewModel, onBack: () -> Unit, title: String = 
                 if (vm.foundBackup) FdBanner("cloud", "This Google account already has a Family Docs backup.", Modifier.padding(top = 4.dp)) {
                     FdTextButton("Restore it", onRestoreInstead)
                 }
+            }
+
+            // ---- your group: start one (e.g. your family) or join one with its code ----
+            if (!vm.editing) FdField("Your group", error = e["group"],
+                hint = if (vm.groupMode == "create") "Everyone in it shares its people, Common vault and events. It gets its own code."
+                       else "Groups saved in this Google account's backup come back with their documents.") {
+                FdSegmented(listOf(Triple("create", "plus", "Create a group"), Triple("join", "key", "Join with code")), vm.groupMode) { vm.groupMode = it }
+                if (vm.groupMode == "create") FdInput(vm.groupName, { vm.groupName = it }, Modifier.padding(top = 10.dp), placeholder = "Group name, e.g. Family")
+                else FdInput(vm.groupCode, { vm.groupCode = it }, Modifier.padding(top = 10.dp), placeholder = "Group code, e.g. K7#-Q2@-XM4")
             }
 
             FdField("Countries you keep documents for", error = e["countries"],

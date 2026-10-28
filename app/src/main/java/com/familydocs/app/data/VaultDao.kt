@@ -19,6 +19,15 @@ interface VaultDao {
     @Query("SELECT * FROM members WHERE isSelf = 1 LIMIT 1") suspend fun selfNow(): MemberEntity?
     @Query("SELECT * FROM members WHERE isSelf = 1 LIMIT 1") fun self(): Flow<MemberEntity?>
     @Query("SELECT * FROM members WHERE shared = 1 LIMIT 1") suspend fun sharedNow(): MemberEntity?
+    @Query("SELECT * FROM members WHERE shared = 1 AND groupId IS :g LIMIT 1") suspend fun sharedIn(g: String?): MemberEntity?
+    /** People of group [g]: you (in every group) plus that group's people. */
+    @Query("SELECT * FROM members WHERE isSelf = 1 OR groupId IS :g ORDER BY shared DESC, isSelf DESC, createdAt") fun membersIn(g: String?): Flow<List<MemberEntity>>
+
+    // ---- groups ----
+    @Query("SELECT * FROM vault_groups ORDER BY createdAt") fun groups(): Flow<List<GroupEntity>>
+    @Query("SELECT * FROM vault_groups ORDER BY createdAt") suspend fun groupsNow(): List<GroupEntity>
+    @Upsert suspend fun upsertGroup(g: GroupEntity)
+    @Query("DELETE FROM vault_groups") suspend fun clearGroups()
     @Upsert suspend fun upsertMember(m: MemberEntity)
     @Query("DELETE FROM members WHERE id = :id") suspend fun deleteMemberRow(id: String)
     @Query("DELETE FROM documents WHERE memberId = :id") suspend fun deleteDocumentsOf(id: String)
@@ -40,6 +49,7 @@ interface VaultDao {
 
     // ---- events ----
     @Query("SELECT * FROM events ORDER BY startDay") fun events(): Flow<List<EventEntity>>
+    @Query("SELECT * FROM events WHERE groupId IS :g ORDER BY startDay") fun eventsIn(g: String?): Flow<List<EventEntity>>
     @Query("SELECT * FROM events") suspend fun eventsNow(): List<EventEntity>
     @Query("SELECT * FROM events WHERE id = :id") fun event(id: String): Flow<EventEntity?>
     @Query("SELECT * FROM events WHERE id = :id") suspend fun eventNow(id: String): EventEntity?
@@ -61,8 +71,10 @@ interface VaultDao {
     @Query("DELETE FROM account") suspend fun clearAccount()
 
     @Transaction
-    suspend fun replaceAll(account: AccountEntity?, members: List<MemberEntity>, docs: List<DocumentEntity>, pws: List<PasswordEntity>, events: List<EventEntity> = emptyList()) {
-        clearEvents(); clearDocuments(); clearPasswords(); clearMembers()
+    suspend fun replaceAll(account: AccountEntity?, members: List<MemberEntity>, docs: List<DocumentEntity>, pws: List<PasswordEntity>, events: List<EventEntity> = emptyList(),
+                           groups: List<GroupEntity> = emptyList()) {
+        clearEvents(); clearDocuments(); clearPasswords(); clearMembers(); clearGroups()
+        groups.forEach { upsertGroup(it) }
         clearAccount()
         account?.let { upsertAccount(it) }
         members.forEach { upsertMember(it) }

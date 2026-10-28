@@ -12,7 +12,7 @@ import java.util.concurrent.TimeUnit
 
 /** Minimal Google Drive v3 REST client (scope drive.file: the app only ever sees files it created). */
 class DriveClient(private val token: String) {
-    data class Item(val id: String, val name: String, val mime: String, val props: Map<String, String>)
+    data class Item(val id: String, val name: String, val mime: String, val props: Map<String, String>, val parents: List<String> = emptyList())
 
     private val http = OkHttpClient.Builder().readTimeout(2, TimeUnit.MINUTES).writeTimeout(2, TimeUnit.MINUTES).build()
 
@@ -25,14 +25,15 @@ class DriveClient(private val token: String) {
 
     private fun parse(o: JSONObject): Item {
         val p = o.optJSONObject("appProperties")
-        return Item(o.getString("id"), o.optString("name"), o.optString("mimeType"), p?.keys()?.asSequence()?.associateWith { p.getString(it) } ?: emptyMap())
+        val parents = o.optJSONArray("parents")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty()
+        return Item(o.getString("id"), o.optString("name"), o.optString("mimeType"), p?.keys()?.asSequence()?.associateWith { p.getString(it) } ?: emptyMap(), parents)
     }
 
     fun list(q: String, space: String = "drive"): List<Item> {
         val out = mutableListOf<Item>()
         var page: String? = null
         do {
-            val url = "$FILES?spaces=$space&pageSize=1000&fields=nextPageToken,files(id,name,mimeType,appProperties)&q=" +
+            val url = "$FILES?spaces=$space&pageSize=1000&fields=nextPageToken,files(id,name,mimeType,appProperties,parents)&q=" +
                 URLEncoder.encode("$q and trashed = false", "UTF-8") + (page?.let { "&pageToken=$it" } ?: "")
             val j = JSONObject(call(Request.Builder().url(url)))
             val arr = j.getJSONArray("files")
@@ -57,6 +58,20 @@ class DriveClient(private val token: String) {
     }
 
     /** Finds the folder tagged with [props] under [parent], creating it if needed; keeps name/description/colour current. */
+    /**
+     * Like [folder], but finds the folder (by its label) anywhere in Drive and moves it under [parent] if it's elsewhere,
+     * keeping everything inside: used when a person's folder moves into their group's folder.
+     */
+    fun folderMovedInto(name: String, parent: String, props: Map<String, String>, description: String? = null): String {
+        val (k, v) = props.entries.first()
+        val existing = findByProp(k, v) ?: return folder(name, parent, props, description)
+        if (parent !in existing.parents) {
+            call(Request.Builder().url("$FILES/${existing.id}?addParents=$parent" + if (existing.parents.isNotEmpty()) "&removeParents=${existing.parents.joinToString(",")}" else "")
+                .patch(JSONObject().toString().toRequestBody(JSON)))
+        }
+        return folder(name, parent, props, description)
+    }
+
     fun folder(name: String, parent: String?, props: Map<String, String>, description: String? = null, color: String? = null): String {
         val (k, v) = props.entries.first()
         val existing = findByProp(k, v, parent)

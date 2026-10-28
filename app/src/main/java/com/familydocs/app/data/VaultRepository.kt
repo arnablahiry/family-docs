@@ -4,6 +4,7 @@ import com.familydocs.app.domain.Countries
 import com.familydocs.app.domain.DocField
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
@@ -25,8 +26,34 @@ class VaultRepository(private val dao: VaultDao, val files: FileStore) {
     var onChanged: () -> Unit = {}
 
     val account: Flow<AccountEntity?> = dao.account()
-    val members: Flow<List<MemberEntity>> = dao.members()
-    val allDocuments: Flow<List<DocumentEntity>> = dao.allDocuments()
+
+    // ---- groups: the screens show the current group's people, documents and events ----
+    /** The group being shown (AppContainer.selectGroup changes it and remembers it). */
+    val groupId = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    val groups: Flow<List<GroupEntity>> = dao.groups()
+    suspend fun groupsNow() = dao.groupsNow()
+    fun membersOf(g: String?): Flow<List<MemberEntity>> = dao.membersIn(g)
+    fun eventsOf(g: String?): Flow<List<EventEntity>> = dao.eventsIn(g)
+    /** Documents of group [g]'s people (yours included). */
+    fun documentsOf(g: String?): Flow<List<DocumentEntity>> = kotlinx.coroutines.flow.combine(dao.allDocuments(), dao.membersIn(g)) { d, m ->
+        val ids = m.map { it.id }.toSet(); d.filter { it.memberId in ids }
+    }
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val members: Flow<List<MemberEntity>> = groupId.flatMapLatest { membersOf(it) }
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val allDocuments: Flow<List<DocumentEntity>> = groupId.flatMapLatest { documentsOf(it) }
+
+    /** A new group with its own Common vault and a fresh code. */
+    suspend fun createGroup(name: String): GroupEntity = withContext(Dispatchers.IO) {
+        val g = GroupEntity(UUID.randomUUID().toString(), name.trim().ifBlank { "Family" }, com.familydocs.app.domain.GroupCodes.new())
+        dao.upsertGroup(g)
+        dao.upsertMember(MemberEntity(UUID.randomUUID().toString(), "Common", "Shared", photoFile = null, createdAt = 0L, shared = true, groupId = g.id))
+        onChanged()
+        g
+    }
+    suspend fun groupByCode(code: String): GroupEntity? = dao.groupsNow().firstOrNull {
+        com.familydocs.app.domain.GroupCodes.normalize(it.code) == com.familydocs.app.domain.GroupCodes.normalize(code)
+    }
     val documentCounts: Flow<List<MemberCount>> = dao.documentCounts()
 
     fun member(id: String) = dao.member(id)
@@ -65,9 +92,9 @@ class VaultRepository(private val dao: VaultDao, val files: FileStore) {
             (self ?: MemberEntity(id = UUID.randomUUID().toString(), name = name, relation = "You", photoFile = null, isSelf = true, avatar = DEFAULT_SELF_AVATAR))
                 .let { it.copy(name = name, photoFile = photoId, avatar = avatar ?: it.avatar ?: DEFAULT_SELF_AVATAR) },
         )
-        // Every family gets one Common vault (rent, bills, Wi-Fi...) that all account holders share.
-        if (dao.sharedNow() == null) {
-            dao.upsertMember(MemberEntity(UUID.randomUUID().toString(), "Common", "Shared", photoFile = null, createdAt = 0L, shared = true))
+        // Every group gets one Common vault (rent, bills, Wi-Fi...) that all its account holders share.
+        if (dao.sharedIn(groupId.value) == null) {
+            dao.upsertMember(MemberEntity(UUID.randomUUID().toString(), "Common", "Shared", photoFile = null, createdAt = 0L, shared = true, groupId = groupId.value))
         }
         if (self == null) ensureFamily()
     }
@@ -80,12 +107,13 @@ class VaultRepository(private val dao: VaultDao, val files: FileStore) {
         val me = dao.selfNow() ?: return@withContext
         val preset = presetFor(me.name) ?: return@withContext
         val rel = PRESET_RELATIONS.getValue(preset.name)
-        val people = dao.membersNow()
+        val g = groupId.value
+        val people = dao.membersNow().filter { it.groupId == g }
         var t = System.currentTimeMillis()
         FAMILY_PRESET.filter { it != preset }.forEach { p ->
             val existing = people.firstOrNull { !it.isSelf && !it.shared && it.name.trim().equals(p.name, ignoreCase = true) }
             when {
-                existing == null -> dao.upsertMember(MemberEntity(UUID.randomUUID().toString(), p.name, rel.getValue(p.name), photoFile = null, createdAt = t++, avatar = p.avatar))
+                existing == null -> dao.upsertMember(MemberEntity(UUID.randomUUID().toString(), p.name, rel.getValue(p.name), photoFile = null, createdAt = t++, avatar = p.avatar, groupId = g))
                 existing.relation == "Family" -> dao.upsertMember(existing.copy(relation = rel.getValue(p.name)))
             }
         }
@@ -103,7 +131,7 @@ class VaultRepository(private val dao: VaultDao, val files: FileStore) {
         val chosenAvatar = avatar ?: old?.avatar ?: nextCharacter()
         dao.upsertMember(
             old?.copy(name = name, relation = relation, photoFile = photoId, avatar = chosenAvatar)
-                ?: MemberEntity(UUID.randomUUID().toString(), name, relation, photoId, avatar = chosenAvatar),
+                ?: MemberEntity(UUID.randomUUID().toString(), name, relation, photoId, avatar = chosenAvatar, groupId = groupId.value),
         )
         if (old?.isSelf == true) dao.accountNow()?.let { a ->
             if (a.photoFile != photoId) { a.photoFile?.takeIf { it != old.photoFile && it != photoId }?.let { files.delete(it) } }
@@ -151,11 +179,12 @@ class VaultRepository(private val dao: VaultDao, val files: FileStore) {
     suspend fun deletePassword(id: String) { dao.deletePassword(id); onChanged() }
 
     // ---- events ----
-    val events: Flow<List<EventEntity>> = dao.events()
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val events: Flow<List<EventEntity>> = groupId.flatMapLatest { eventsOf(it) }
     fun event(id: String) = dao.event(id)
     fun eventDocuments(eventId: String) = dao.eventDocuments(eventId)
     suspend fun eventNow(id: String) = dao.eventNow(id)
-    suspend fun saveEvent(e: EventEntity) = withContext(Dispatchers.IO) { dao.upsertEvent(e); onChanged() }
+    suspend fun saveEvent(e: EventEntity) = withContext(Dispatchers.IO) { dao.upsertEvent(if (e.groupId == null) e.copy(groupId = groupId.value) else e); onChanged() }
     suspend fun setEventPins(id: String, pins: List<String>) = withContext(Dispatchers.IO) {
         dao.eventNow(id)?.let { dao.upsertEvent(it.copy(pins = pins.distinct().joinToString(","))) }
         onChanged()
@@ -171,7 +200,7 @@ class VaultRepository(private val dao: VaultDao, val files: FileStore) {
 
     // ---- used by backup ----
     suspend fun snapshot() = withContext(Dispatchers.IO) {
-        Snapshot(dao.accountNow(), dao.membersNow(), dao.allDocumentsNow(), dao.allPasswordsNow(), dao.eventsNow())
+        Snapshot(dao.accountNow(), dao.membersNow(), dao.allDocumentsNow(), dao.allPasswordsNow(), dao.eventsNow(), dao.groupsNow())
     }
 
     /** Marks the account as linked to this Google account (its Drive holds the backups). */
@@ -182,10 +211,21 @@ class VaultRepository(private val dao: VaultDao, val files: FileStore) {
     /** Removes every account, person, document and password from this phone. */
     suspend fun wipe() = withContext(Dispatchers.IO) { dao.replaceAll(null, emptyList(), emptyList(), emptyList()); files.clear() }
 
-    suspend fun restore(s: Snapshot) = withContext(Dispatchers.IO) { dao.replaceAll(s.account, s.members, s.documents, s.passwords, s.events) }
+    suspend fun restore(s: Snapshot) = withContext(Dispatchers.IO) {
+        var snap = s
+        // A backup from before groups: it all becomes the group "Family", like the database upgrade does.
+        if (s.groups.isEmpty() && s.members.any { !it.isSelf }) {
+            val g = GroupEntity(UUID.randomUUID().toString(), "Family", com.familydocs.app.domain.GroupCodes.new())
+            snap = s.copy(groups = listOf(g), members = s.members.map { if (it.isSelf) it else it.copy(groupId = it.groupId ?: g.id) },
+                events = s.events.map { it.copy(groupId = it.groupId ?: g.id) })
+        }
+        dao.replaceAll(snap.account, snap.members, snap.documents, snap.passwords, snap.events, snap.groups)
+        if (snap.groups.none { it.id == groupId.value }) groupId.value = snap.groups.firstOrNull()?.id
+    }
 
     data class Snapshot(
         val account: AccountEntity?, val members: List<MemberEntity>, val documents: List<DocumentEntity>, val passwords: List<PasswordEntity>,
         val events: List<EventEntity> = emptyList(),
+        val groups: List<GroupEntity> = emptyList(),
     )
 }

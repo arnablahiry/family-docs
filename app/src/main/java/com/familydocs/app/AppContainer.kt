@@ -22,7 +22,10 @@ class AppContainer(context: Context) {
     val db: AppDatabase by lazy { AppDatabase.build(app, crypto.databasePassphrase()) }
     val repo: VaultRepository by lazy {
         // Any change to the vault: back up to Drive a couple of minutes later (when backup is on).
-        VaultRepository(db.dao(), files).also { r -> r.onChanged = { if (settings.value.backupEnabled) BackupWorker.soon(app) } }
+        VaultRepository(db.dao(), files).also { r ->
+            r.onChanged = { if (settings.value.backupEnabled) BackupWorker.soon(app) }
+            r.groupId.value = settings.value.currentGroup
+        }
     }
     val passcode = PasscodeManager(app)
     val settings = SettingsStore(app)
@@ -34,6 +37,17 @@ class AppContainer(context: Context) {
     /** In-app updates from the GitHub releases (checked at app start; Settings › About shows and installs them). */
     val updater = com.familydocs.app.update.AppUpdater(app)
     val backup: DriveBackup by lazy { DriveBackup(app, repo, files, BackupKeyStore(app, crypto)) }
+
+    /** Shows group [id] on Home and remembers it. */
+    fun selectGroup(id: String?) { repo.groupId.value = id; settings.update { it.copy(currentGroup = id) } }
+
+    /** After start-up or a restore: make sure the current group exists (else the first one). */
+    suspend fun settleGroup() {
+        val gs = repo.groupsNow()
+        val want = settings.value.currentGroup
+        val id = gs.firstOrNull { it.id == want }?.id ?: gs.firstOrNull()?.id
+        if (id != repo.groupId.value || id != want) selectGroup(id)
+    }
 
     /** Turns the daily Drive backup (plus one after each change) on or off; [now] also queues one right away. */
     fun setBackups(on: Boolean, now: Boolean = false) {
@@ -51,6 +65,7 @@ class AppContainer(context: Context) {
         backup.forgetManifest() // the next backup (on any account) checks everything again
         repo.wipe()
         settings.reset()
+        repo.groupId.value = null
         passcode.clear() // last: this is what switches the app back to the welcome screen
     }
 }

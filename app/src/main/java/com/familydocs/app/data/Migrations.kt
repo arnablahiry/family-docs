@@ -60,10 +60,31 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
     }
 }
 
+/**
+ * v7: groups. Everything already on the phone becomes the first group, "Family" (with a fresh code); you stay in every
+ * group. Nothing is deleted.
+ */
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS `vault_groups` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `code` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+        db.execSQL("ALTER TABLE members ADD COLUMN groupId TEXT")
+        db.execSQL("ALTER TABLE events ADD COLUMN groupId TEXT")
+        val hasPeople = db.query("SELECT COUNT(*) FROM members").use { it.moveToFirst() && it.getInt(0) > 0 }
+        if (hasPeople) {
+            val id = java.util.UUID.randomUUID().toString()
+            db.execSQL("INSERT INTO vault_groups (id, name, code, createdAt) VALUES (?, ?, ?, ?)",
+                arrayOf<Any>(id, "Family", com.familydocs.app.domain.GroupCodes.new(), System.currentTimeMillis()))
+            db.execSQL("UPDATE members SET groupId = ? WHERE isSelf = 0", arrayOf<Any>(id))
+            db.execSQL("UPDATE events SET groupId = ?", arrayOf<Any>(id))
+        }
+    }
+}
+
 val ALL_MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_1_2,
     MIGRATION_2_3,
     MIGRATION_3_4,
     MIGRATION_4_5,
     MIGRATION_5_6,
+    MIGRATION_6_7,
 )

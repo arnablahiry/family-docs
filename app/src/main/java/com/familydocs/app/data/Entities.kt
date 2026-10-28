@@ -20,6 +20,15 @@ data class Attachment(val id: String, val mime: String) {
     }
 }
 
+/** A group (e.g. your family): its own people, Common vault and events, and a code to join it. Database version 7. */
+@Entity(tableName = "vault_groups")
+data class GroupEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val code: String,
+    val createdAt: Long = System.currentTimeMillis(),
+)
+
 @Entity(tableName = "account")
 data class AccountEntity(
     @PrimaryKey val id: Int = 1,
@@ -45,6 +54,8 @@ data class MemberEntity(
     val shared: Boolean = false,
     /** Illustrated character used when there's no photo (e.g. "char_blue_short"). Added in database version 2. */
     val avatar: String? = null,
+    /** The group this person belongs to; null for you (you're in every group). Added in database version 7. */
+    val groupId: String? = null,
 )
 
 enum class DisplayMode { ICON, FROM_FILE, CUSTOM }
@@ -146,6 +157,8 @@ data class EventEntity(
     val remindDays: Int = -1,
     val notes: String = "",
     val createdAt: Long = System.currentTimeMillis(),
+    /** The group the event belongs to. Added in database version 7. */
+    val groupId: String? = null,
 ) {
     val peopleIds: List<String> get() = people.split(',').filter { it.isNotBlank() }
     val visibleIds: List<String> get() = visibleTo.split(',').filter { it.isNotBlank() }

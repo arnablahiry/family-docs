@@ -15,5 +15,6 @@ class FamilyDocsApp : Application() {
         // Keeps the daily backup scheduled (and moves older weekly schedules onto it).
         if (container.settings.value.backupEnabled) com.familydocs.app.backup.BackupWorker.schedule(this, true)
         container.appScope.launch { container.updater.check() } // quiet check for a newer release
+        container.appScope.launch { container.settleGroup() }
     }
 }

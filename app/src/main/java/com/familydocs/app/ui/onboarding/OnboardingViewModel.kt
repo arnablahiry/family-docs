@@ -27,6 +27,10 @@ class OnboardingViewModel(private val c: AppContainer) : ViewModel() {
     var email by mutableStateOf("")
     var googleLinked by mutableStateOf(false)
     var countries by mutableStateOf(Countries.DEFAULT)
+    /** Sign-up: "create" a group (named [groupName]) or "join" one with [groupCode]. */
+    var groupMode by mutableStateOf("create")
+    var groupName by mutableStateOf("")
+    var groupCode by mutableStateOf("")
     var errors by mutableStateOf(emptyMap<String, String>()); private set
     var busy by mutableStateOf(false); private set
     var message by mutableStateOf<String?>(null)
@@ -141,6 +145,7 @@ class OnboardingViewModel(private val c: AppContainer) : ViewModel() {
         if (digits.length !in 7..12) e["phone"] = "Enter a phone number with 7–12 digits"
         if (!googleLinked || email.isBlank()) e["email"] = "Connect your Google account to continue"
         if (countries.isEmpty()) e["countries"] = "Pick at least one country"
+        if (!editing && groupMode == "join" && com.familydocs.app.domain.GroupCodes.normalize(groupCode).length < 6) e["group"] = "Enter the group's code"
         errors = e
         return e.isEmpty()
     }
@@ -153,6 +158,22 @@ class OnboardingViewModel(private val c: AppContainer) : ViewModel() {
             if (biometric != null) c.settings.update { it.copy(biometric = biometric) }
             c.appLock.unlock(); busy = false; onDone(); return@launch
         }
+        // Joining with a code: the group (and its documents) comes from this Google account's backup.
+        if (!editing && groupMode == "join") {
+            val s = session
+            val err = when {
+                s == null -> "Connect your Google account first"
+                runCatching { c.backup.hasBackup(s.token) }.getOrDefault(false).not() -> "There's no Family Docs backup in ${s.profile.email} to join from"
+                else -> runCatching { c.backup.restore(s.token) }.exceptionOrNull()?.let { "Couldn't open the backup: ${it.message ?: "unknown error"}" }
+                    ?: c.repo.groupByCode(groupCode).let { g -> if (g == null) "No group with this code in ${s.profile.email}'s backup" else { c.selectGroup(g.id); null } }
+            }
+            if (err != null) { errors = errors + ("group" to err); busy = false; return@launch }
+            pendingPasscode?.let { code -> withContext(Dispatchers.Default) { c.passcode.set(code) } }
+            if (biometric != null) c.settings.update { it.copy(biometric = biometric) }
+            c.setBackups(true)
+            c.appLock.unlock(); busy = false; onDone(); return@launch
+        }
+        if (!editing) c.selectGroup(c.repo.createGroup(groupName.ifBlank { "Family" }).id)
         val bytes = picked?.let { bmp -> withContext(Dispatchers.Default) { Images.jpeg(cropToSquare(bmp, crop, cropBoxPx)) } }
         if (!editing && !avatarChosen) com.familydocs.app.data.presetFor(name)?.let { avatar = it.avatar }
         c.repo.saveAccount(name.trim(), countryCode, phone.trim(), email.trim(), bytes, googleLinked, countries,

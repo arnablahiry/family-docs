@@ -123,10 +123,14 @@ class DriveBackup(
         /** true when [k] is unchanged since the last backup (and this isn't the weekly full check); remembers [v] either way */
         fun same(k: String, v: String): Boolean { seen[k] = v; return !full && manifest.getString(k, null) == v }
 
+        // My Drive › Family Docs › <your folder> (your documents are in every group) and one folder per group
+        // (Family, Flatmates…) holding that group's people. Existing folders are moved in, not uploaded again.
+        val groupFolders = s.groups.associate { g -> g.id to drive.folder(g.name, root, mapOf(P_GROUP to g.id), "Family Docs group · its people, Common vault and events") }
         val memberFolders = mutableMapOf<String, String>()
         s.members.forEach { m ->
             val title = if (m.shared) "${m.name} (shared)" else m.name
-            memberFolders[m.id] = drive.folder(title, root, mapOf(P_MEMBER to m.id), if (m.shared) "Shared with the whole family" else m.relation)
+            val parent = m.groupId?.let { groupFolders[it] } ?: root
+            memberFolders[m.id] = drive.folderMovedInto(title, parent, mapOf(P_MEMBER to m.id), if (m.shared) "Shared with the whole group" else m.relation)
         }
 
         s.documents.forEachIndexed { i, d ->
@@ -201,17 +205,23 @@ class DriveBackup(
         onProgress("Tidying up…")
         val liveDocs = s.documents.map { it.id }.toSet(); val liveMembers = s.members.map { it.id }.toSet()
         // only when documents or people were added/removed since the last backup
-        if (!same("tidy", sha((liveDocs.sorted() + "|" + liveMembers.sorted()).joinToString(",")))) memberFolders.values.forEach { mf ->
+        if (!same("tidy", sha((liveDocs.sorted() + "|" + liveMembers.sorted() + "|" + s.groups.map { it.id + it.name }.sorted()).joinToString(",")))) memberFolders.values.forEach { mf ->
             drive.children(mf).filter { it.mime == DriveClient.FOLDER && it.props[P_DOC] != null && it.props[P_DOC] !in liveDocs }.forEach { drive.trash(it.id); removed++ }
         }
-        if (manifest.getString("tidy", null) != seen["tidy"] || full)
-            drive.children(root).filter { it.mime == DriveClient.FOLDER && it.props[P_MEMBER] != null && it.props[P_MEMBER] !in liveMembers }.forEach { drive.trash(it.id); removed++ }
+        if (manifest.getString("tidy", null) != seen["tidy"] || full) {
+            val liveGroups = s.groups.map { it.id }.toSet()
+            (listOf(root) + groupFolders.values).forEach { parent ->
+                drive.children(parent).filter { it.mime == DriveClient.FOLDER && it.props[P_MEMBER] != null && it.props[P_MEMBER] !in liveMembers }.forEach { drive.trash(it.id); removed++ }
+            }
+            drive.children(root).filter { it.mime == DriveClient.FOLDER && it.props[P_GROUP] != null && it.props[P_GROUP] !in liveGroups }.forEach { drive.trash(it.id); removed++ }
+        }
 
         onProgress("Writing index…")
         val index = JSONObject()
             .put("format", 2)
             .put("account", s.account?.let { accountJson(it) } ?: JSONObject.NULL)
             .put("members", JSONArray(s.members.map { memberJson(it) }))
+            .put("groups", JSONArray(s.groups.map { JSONObject().put("id", it.id).put("name", it.name).put("code", it.code).put("created", it.createdAt) }))
             .put("documents", JSONArray(s.documents.map { JSONObject().put("id", it.id).put("member", it.memberId).put("order", it.sortOrder ?: JSONObject.NULL) }))
         val indexText = index.toString()
         if (!same("index", sha(indexText))) drive.upsertFile(root, "Family Docs vault.fdenc", seal(indexText.toByteArray()), OCTET, mapOf(P_KIND to "index", P_DOC_FILE to "index"),
@@ -248,7 +258,8 @@ class DriveBackup(
         val rootChildren = drive.children(root.id)
         members.forEachIndexed { mi, mj ->
             onProgress("Restoring ${mj.getString("name")} (${mi + 1} of ${members.size})…")
-            val folder = rootChildren.firstOrNull { it.props[P_MEMBER] == mj.getString("id") } ?: return@forEachIndexed
+            // at the top (you, older backups) or inside the person's group folder
+            val folder = rootChildren.firstOrNull { it.props[P_MEMBER] == mj.getString("id") } ?: drive.findByProp(P_MEMBER, mj.getString("id")) ?: return@forEachIndexed
             val inside = drive.children(folder.id)
             var photoId: String? = null
             inside.firstOrNull { it.props[P_KIND] == "photo" }?.let { f -> photoId = "m-" + mj.getString("id"); blobs[photoId!!] = open(drive.download(f.id)) }
@@ -292,7 +303,9 @@ class DriveBackup(
         onProgress("Saving to this phone…")
         files.clear()
         blobs.forEach { (id, data) -> files.put(data, id) }
-        repo.restore(VaultRepository.Snapshot(account, memberEntities, docs, pws, events))
+        val groups = index.optJSONArray("groups")?.let { a -> (0 until a.length()).map { a.getJSONObject(it) }
+            .map { com.familydocs.app.data.GroupEntity(it.getString("id"), it.getString("name"), it.getString("code"), it.optLong("created")) } }.orEmpty()
+        repo.restore(VaultRepository.Snapshot(account, memberEntities, docs, pws, events, groups))
         keys.install(k)
         com.familydocs.app.events.EventReminders.rescheduleAll(context, events)
     }
@@ -316,17 +329,19 @@ class DriveBackup(
 
     private fun eventJson(e: com.familydocs.app.data.EventEntity) = JSONObject().put("id", e.id).put("name", e.name).put("art", e.art)
         .put("start", e.startDay).put("end", e.endDay ?: JSONObject.NULL).put("people", e.people).put("visible", e.visibleTo).put("pins", e.pins)
-        .put("remind", e.remindDays).put("notes", e.notes).put("created", e.createdAt)
+        .put("remind", e.remindDays).put("notes", e.notes).put("created", e.createdAt).put("group", e.groupId ?: JSONObject.NULL)
     private fun eventFromJson(j: JSONObject, photo: String?) = com.familydocs.app.data.EventEntity(
         id = j.getString("id"), name = j.getString("name"), art = j.optString("art", "trip"), photoFile = photo, startDay = j.getString("start"),
         endDay = if (j.isNull("end")) null else j.optString("end"), people = j.optString("people"), visibleTo = j.optString("visible"),
         pins = j.optString("pins"), remindDays = j.optInt("remind", -1), notes = j.optString("notes"), createdAt = j.optLong("created"),
+        groupId = if (!j.has("group") || j.isNull("group")) null else j.getString("group"),
     )
 
     private fun memberJson(m: MemberEntity) = JSONObject().put("id", m.id).put("name", m.name).put("relation", m.relation)
-        .put("self", m.isSelf).put("shared", m.shared).put("created", m.createdAt).put("avatar", m.avatar ?: JSONObject.NULL)
+        .put("self", m.isSelf).put("shared", m.shared).put("created", m.createdAt).put("avatar", m.avatar ?: JSONObject.NULL).put("group", m.groupId ?: JSONObject.NULL)
     private fun memberFromJson(j: JSONObject, photo: String?) = MemberEntity(j.getString("id"), j.getString("name"), j.getString("relation"), photo,
-        j.optBoolean("self"), j.optLong("created"), j.optBoolean("shared"), if (j.isNull("avatar")) null else j.optString("avatar"))
+        j.optBoolean("self"), j.optLong("created"), j.optBoolean("shared"), if (j.isNull("avatar")) null else j.optString("avatar"),
+        groupId = if (!j.has("group") || j.isNull("group")) null else j.getString("group"))
 
     private fun pwJson(p: PasswordEntity) = JSONObject().put("id", p.id).put("member", p.memberId).put("site", p.site).put("user", p.username).put("pass", p.password).put("created", p.createdAt)
     private fun pwFromJson(j: JSONObject) = PasswordEntity(j.getString("id"), j.getString("member"), j.getString("site"), j.getString("user"), j.getString("pass"), j.optLong("created"))
@@ -343,7 +358,7 @@ class DriveBackup(
         const val KEY_FILE = "family-docs-backup-key.json"
         private const val OCTET = "application/octet-stream"
         // label keys (Drive appProperties)
-        const val P_ROOT = "fd_root"; const val P_MEMBER = "fd_member"; const val P_MEMBER_OF = "fd_member_of"; const val P_DOC = "fd_doc"
+        const val P_ROOT = "fd_root"; const val P_GROUP = "fd_group"; const val P_MEMBER = "fd_member"; const val P_MEMBER_OF = "fd_member_of"; const val P_DOC = "fd_doc"
         const val P_DOC_FILE = "fd_file"; const val P_KIND = "fd_kind"; const val P_TYPE = "fd_type"; const val P_COUNTRY = "fd_country"
         const val P_EXPIRY = "fd_expiry"; const val P_UPDATED = "fd_updated"
     }
