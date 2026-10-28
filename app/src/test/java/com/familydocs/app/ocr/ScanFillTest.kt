@@ -102,4 +102,12 @@ class ScanFillTest {
         val t = DocTypes.template("Bachelor degree")
         assertTrue("Subject / Field" in t && "Specialisation" in t)
     }
+
+    @Test fun passport_issueDateFromPrintedPart() {
+        val (l1, l2) = td3()
+        val r = DocumentParser.parse("REPUBLIC OF INDIA\nPASSPORT\nDate of Issue\n16/08/2024\n$l1\n$l2", "Passport")
+        assertEquals("16/08/2024", value(r.fields, "Date of Issue"))
+        assertEquals("15/08/2034", value(r.fields, "Date of Expiry"))
+        assertTrue("Date of Issue" in DocTypes.template("Passport"))
+    }
 }

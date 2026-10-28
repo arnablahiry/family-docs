@@ -241,7 +241,7 @@ fun SettingsScreen(onBack: () -> Unit, onEditAccount: () -> Unit, onChangePassco
                 FdListItem("Family Docs ${version.substringBeforeLast('.').ifBlank { version }}",
                     "${members.size} people · ${docs.size} documents on this phone", first = true, icon = "info")
             }
-            Spacer(Modifier.height(30.dp))
+            com.familydocs.app.ui.ds.FdMadeWith(Modifier.padding(top = 26.dp, bottom = 30.dp))
         }
     }
 

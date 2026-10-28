@@ -227,8 +227,17 @@ fun DocumentEntity.tail(): String {
     return when { f == null -> "No details yet"; f.sensitive -> f.value.trim(); else -> f.value.take(14) }
 }
 
-fun DocumentEntity.validUntil(): String? =
-    fields.firstOrNull { Regex("expiry|valid until|valid till", RegexOption.IGNORE_CASE).containsMatchIn(it.label) && it.value.isNotBlank() }?.value
+fun DocumentEntity.validUntil(): String? = fieldValue("expiry")
+
+/**
+ * Dates printed on the wallet card: the expiry date if there is one, otherwise the issue date; a passport shows both.
+ * Nothing when neither is filled in (no "Added" date).
+ */
+fun DocumentEntity.cardDates(): List<Pair<String, String>> {
+    val expiry = fieldValue("expiry")?.let { "VALID UNTIL" to it }
+    val issued = fieldValue("issued")?.let { "ISSUED" to it }
+    return if (DocTypes.forName(name).key == "passport") listOfNotNull(issued, expiry) else listOfNotNull(expiry ?: issued)
+}
 
 fun DocumentEntity.holder(fallback: String): String {
     fun get(re: String) = fields.firstOrNull { Regex(re, RegexOption.IGNORE_CASE).containsMatchIn(it.label) && it.value.isNotBlank() }?.value
@@ -277,7 +286,7 @@ fun FdWalletCard(
     val sheet = c.mix(hue, .10f, c.surface)
     val shadow by animateDpAsState(if (open) 18.dp else 6.dp, tween(350, easing = FdEase), label = "cardShadow")
     val shape = RoundedCornerShape(18.dp)
-    val until = doc.validUntil()
+    val dates = doc.cardDates()
     val holder = doc.holder(holderFallback)
 
     BoxWithConstraints(
@@ -317,7 +326,7 @@ fun FdWalletCard(
                     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(7.dp)) {
                         CardLabel("HOLDER", holder.uppercase(), ink)
                         Text(doc.tail(), style = fdText(16f, color = ink, spacing = .06f), maxLines = 1)
-                        CardLabel(if (until != null) "VALID UNTIL" else "ADDED", (until ?: fmtDate(doc.createdAt)).uppercase(), ink)
+                        dates.forEach { (l, v) -> CardLabel(l, v.uppercase(), ink) }
                     }
                 }
                 CardTpl.PAPER -> {
@@ -325,11 +334,11 @@ fun FdWalletCard(
                         listOf(.62f, .50f, .36f).forEach { f -> Box(Modifier.fillMaxWidth(f).height(5.dp).clip(RoundedCornerShape(3.dp)).background(ink.copy(alpha = .13f))) }
                     }
                     Spacer(Modifier.weight(1f))
-                    CardBottom(holder, until, doc.createdAt, open, ink)
+                    CardBottom(holder, dates, open, ink)
                 }
                 CardTpl.PASSPORT -> {
                     Spacer(Modifier.weight(1f))
-                    CardBottom(holder, until, doc.createdAt, open, ink)
+                    CardBottom(holder, dates, open, ink)
                     val (l1, l2) = mrzLines(holder, doc.issuer, doc.tail())
                     Column(Modifier.padding(top = 9.dp).alpha(.55f)) {
                         Text(l1, style = fdText(10f, color = ink, spacing = .14f, lineHeight = 14.5f), maxLines = 1, softWrap = false, overflow = TextOverflow.Clip)
@@ -345,7 +354,7 @@ fun FdWalletCard(
                         Text(subject, style = fdText(19f, FontWeight.SemiBold, ink), maxLines = 1, overflow = TextOverflow.Ellipsis)
                         doc.fieldValue("specialisation")?.let { Text(it, style = fdText(13.5f, color = ink.copy(alpha = .9f)), maxLines = 1, overflow = TextOverflow.Ellipsis) }
                     } else Text(doc.tail(), style = fdText(19f, color = ink, spacing = .06f))
-                    Box(Modifier.padding(top = 8.dp)) { CardBottom(holder, until, doc.createdAt, open, ink) }
+                    Box(Modifier.padding(top = 8.dp)) { CardBottom(holder, dates, open, ink) }
                 }
             }
         }
@@ -359,13 +368,15 @@ fun FdWalletCard(
     }
 }
 
-/** `.wbot`: Holder on the left, Valid until / Added on the right (hidden under the "Tap again" pill while lifted). */
+/** `.wbot`: Holder on the left, the card's dates on the right (hidden under the "Tap again" pill while lifted). */
 @Composable
-private fun CardBottom(holder: String, until: String?, created: Long, open: Boolean, ink: Color) {
+private fun CardBottom(holder: String, dates: List<Pair<String, String>>, open: Boolean, ink: Color) {
     val fade by animateFloatAsState(if (open) 0f else 1f, tween(150), label = "rightLabel")
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
         CardLabel("HOLDER", holder.uppercase(), ink, Modifier.weight(1f, fill = false))
-        CardLabel(if (until != null) "VALID UNTIL" else "ADDED", (until ?: fmtDate(created)).uppercase(), ink, Modifier.alpha(fade), end = true)
+        if (dates.isNotEmpty()) Row(Modifier.alpha(fade).padding(start = 12.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            dates.forEach { (l, v) -> CardLabel(l, v.uppercase(), ink, end = true) }
+        }
     }
 }
 

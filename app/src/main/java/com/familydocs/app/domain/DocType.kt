@@ -52,7 +52,7 @@ object DocTypes {
     val TEMPLATES: Map<String, List<String>> = mapOf(
         "aadhaar" to listOf("Aadhaar Number", "Name", "Date of Birth", "Gender", "Address"),
         "pan" to listOf("PAN", "Name", "Father's Name", "Date of Birth"),
-        "passport" to listOf("Passport No.", "Surname", "Given Names", "Nationality", "Date of Birth", "Date of Expiry"),
+        "passport" to listOf("Passport No.", "Surname", "Given Names", "Nationality", "Date of Birth", "Date of Issue", "Date of Expiry"),
         "visa" to listOf("Visa No.", "Type", "Valid From", "Valid Until", "Entries"),
         "residence" to listOf("Permit No.", "Type of Permit", "Valid Until", "Nationality"),
         "driving" to listOf("Licence No.", "Valid Until", "Vehicle Classes"),

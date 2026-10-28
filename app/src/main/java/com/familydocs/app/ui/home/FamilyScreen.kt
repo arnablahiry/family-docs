@@ -134,6 +134,7 @@ fun FamilyScreen(onMember: (String) -> Unit, onSettings: () -> Unit, onDocument:
             }
             // The + is for events now; adding family members lives in Settings › Family.
             item(span = { full }) { EventsStrip(events, onEvent, onNewEvent) }
+            item(span = { full }) { com.familydocs.app.ui.ds.FdMadeWith(Modifier.padding(top = 30.dp, bottom = 6.dp)) }
         }
     }
 }

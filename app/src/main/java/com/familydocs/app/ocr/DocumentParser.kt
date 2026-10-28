@@ -29,7 +29,13 @@ object DocumentParser {
         val lines = text.lines().map { it.trim() }.filter { it.isNotEmpty() }
         val up = text.uppercase()
 
-        (findMrz(lines) ?: findMrzLoose(text))?.let { mrz -> return parseMrz(mrz, up).let { r -> r.copy(fields = r.fields.filter { it.value.isNotBlank() }) } }
+        (findMrz(lines) ?: findMrzLoose(text))?.let { mrz ->
+            val r = parseMrz(mrz, up)
+            // The machine-readable lines have no issue date: look for it in the printed part ("Date of Issue 12/03/2019").
+            val (re, kind) = lookup("Date of Issue")
+            val issued = find(lines, re, kind)?.let { listOf(f("Date of Issue", it)) }.orEmpty()
+            return r.copy(fields = (r.fields + issued).filter { it.value.isNotBlank() })
+        }
         parseAadhaar(text, lines, up)?.let { return it }
         parsePan(lines, up)?.let { return it }
         parseDrivingLicence(lines, up)?.let { return it }
