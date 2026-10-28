@@ -297,7 +297,7 @@ fun FdWalletCard(
 
     BoxWithConstraints(
         modifier.fillMaxWidth().shadow(shadow, shape, ambientColor = deep, spotColor = deep).clip(shape)
-            .border(1.5.dp, (if (paper) hue.copy(alpha = .55f) else Color.White.copy(alpha = .5f)).copy(alpha = (if (paper) .55f else .5f) * rim), shape)
+            .border(2.dp, (if (paper) hue else Color.White).copy(alpha = (if (paper) .7f else .75f) * rim), shape)
             .then(if (paper) Modifier.background(sheet).border(1.dp, hue.copy(alpha = .22f), shape)
             else Modifier.background(Brush.linearGradient(listOf(hue, deep), Offset.Zero, Offset(900f, 1100f)))),
     ) {
@@ -514,7 +514,12 @@ fun FdWalletStack(
         // tap on a card: lift it, or open it when it's already lifted (looked up by id: positions change when reordering)
         val latestTap by rememberUpdatedState<(DocumentEntity, Int) -> Unit> { d, _ ->
             val at = order.indexOfFirst { it.id == d.id }
-            if (d.id == expandedId) onOpen(d) else onExpand(d.id, with(density) { tops.getOrNull(at)?.toPx() ?: 0f })
+            when {
+                d.id == expandedId -> onOpen(d)
+                // another card is lifted: this tap only puts that one back
+                expandedId != null -> onExpand(null, 0f)
+                else -> onExpand(d.id, with(density) { tops.getOrNull(at)?.toPx() ?: 0f })
+            }
         }
         val total = if (order.isEmpty()) 0.dp else tops.last() + cardH
         val height by animateDpAsState(total, tween(450, easing = FdEase), label = "stackH")

@@ -183,6 +183,7 @@ fun MemberScreen(memberId: String, onBack: () -> Unit, onEdit: () -> Unit, onPas
                             shown, if (m.shared) "Family" else m.name, expanded,
                             onExpand = { id, topPx ->
                                 expanded = id
+                                if (id != null)
                                 // bring the lifted card near the top (the stack is item 4, or 5 when the country pills show)
                                 scope.launch { list.animateScrollToItem(if (codes.size > 1) 5 else 4, (topPx - 120).toInt().coerceAtLeast(0)) }
                             },
@@ -311,7 +312,7 @@ private class RubberBand(private val scope: kotlinx.coroutines.CoroutineScope) :
     private var level: kotlinx.coroutines.Job? = null
     private fun lean(dy: Float) {
         if (dy == 0f) return
-        tilt = (tilt * .72f + dy * .06f).coerceIn(-6f, 6f)
+        tilt = (tilt * .7f + dy * .05f).coerceIn(-7f, 7f)
         level?.cancel()
         level = scope.launch { kotlinx.coroutines.delay(60); animate(tilt, 0f, animationSpec = spring(dampingRatio = .7f, stiffness = 110f)) { v, _ -> tilt = v } }
     }
@@ -322,6 +323,7 @@ private class RubberBand(private val scope: kotlinx.coroutines.CoroutineScope) :
         settle?.cancel()
         val resist = 1f / (1f + abs(value) / 320f)
         value = (value + available.y * .5f * resist).coerceIn(-420f, 620f)
+        lean(available.y * .4f)   // stretching / squishing at the ends leans them too
         return Offset(0f, available.y)
     }
 
