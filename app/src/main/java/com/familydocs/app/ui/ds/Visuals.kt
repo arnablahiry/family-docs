@@ -58,6 +58,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -187,6 +188,9 @@ fun FdFlag(code: String, width: Dp = 22.dp, ring: Color = Color(0x1F000000), gre
     else Box(m.background(Color(0x33808080)), contentAlignment = Alignment.Center) { Text(code, style = fdText(9f, FontWeight.Bold)) }
 }
 
+/** The darker colour of a card's thick edge (shown while the stack leans). */
+private fun edgeOf(d: DocumentEntity): Color = lerp(Color(0xFF0B1020), Color(DocTypes.forName(d.name).hue), .62f)
+
 // ---------------- document icons ----------------
 
 fun DocIcon.demoName(): String = when (this) {
@@ -289,7 +293,7 @@ fun FdWalletCard(
     val paper = tpl == CardTpl.PAPER
     val ink = if (paper) c.mix(hue, .45f, c.fg) else Color.White
     val sheet = c.mix(hue, .10f, c.surface)
-    val shadow by animateDpAsState(if (open) 18.dp else 8.dp, tween(350, easing = FdEase), label = "cardShadow")
+    val shadow by animateDpAsState(if (open) 18.dp else 12.dp, tween(350, easing = FdEase), label = "cardShadow")
     // The lifted (selected) card gets a soft light rim.
     val rim by animateFloatAsState(if (open) 1f else 0f, tween(300, easing = FdEase), label = "cardRim")
     val shape = RoundedCornerShape(18.dp)
@@ -297,7 +301,7 @@ fun FdWalletCard(
     val holder = doc.holder(holderFallback)
 
     BoxWithConstraints(
-        modifier.fillMaxWidth().shadow(shadow, shape, ambientColor = Color(0x59000000), spotColor = Color(0x73000000)).clip(shape)
+        modifier.fillMaxWidth().shadow(shadow, shape, ambientColor = Color(0x80000000), spotColor = Color(0xA6000000)).clip(shape)
             .border(2.dp, (if (paper) hue else Color.White).copy(alpha = (if (paper) .7f else .75f) * rim), shape)
             .then(if (paper) Modifier.background(sheet).border(1.dp, hue.copy(alpha = .22f), shape)
             else Modifier.background(Brush.linearGradient(listOf(hue, deep), Offset.Zero, Offset(900f, 1100f)))),
@@ -526,13 +530,11 @@ fun FdWalletStack(
         val height by animateDpAsState(total, tween(450, easing = FdEase), label = "stackH")
         // Overscroll "magnet": pulled down at the top ([stretch] > 0) the cards spread apart, a little more further down
         // the stack; pushed up at the bottom (< 0) they squish together. Read in the layout phase only, so it's smooth.
-        val minGapPx = with(density) { 18.dp.toPx() }
+        val minGapPx = with(density) { 26.dp.toPx() }
         fun extra(i: Int): Float {
             val s = stretch()
-            val rubber = if (s >= 0f) s * .32f * i * (1f + i * .06f) else maxOf(s * .3f, -(stripPx - minGapPx)) * i
-            // While scrolling the cards further down trail behind a little (they fan out, then settle with the lean).
-            val lag = (-tilt() * i * 1.2f * density.density).coerceAtLeast(-(stripPx - minGapPx) * i * .4f)
-            return rubber + if (dragId == null) lag else 0f
+            // the cards move with the list; only at the ends do they spread a little (top) or squish (bottom)
+            return if (s >= 0f) s * .2f * i else maxOf(s * .22f, -(stripPx - minGapPx)) * i
         }
         Box(Modifier.fillMaxWidth().layout { m, c ->
             // Stretching grows the stack; squishing keeps its height, so the cards squeeze up towards the first one
@@ -563,6 +565,12 @@ fun FdWalletStack(
                         Modifier.zIndex(if (dragging || d.id == landingId) 1000f else i.toFloat()).then(place).height(cardH).alpha(dim)
                             // scrolling: the cards lean back a little with the motion (a touch less further down)
                             .graphicsLayer { scaleX = lift; scaleY = lift; if (!dragging) { rotationX = -tilt() * (1f - i * .05f).coerceAtLeast(.7f) /* negative: top edge towards you */; cameraDistance = 7f * this.density } }
+                            // a thick card: tipped towards you its top edge shows, tipped away its bottom edge
+                            .then(if (dragging) Modifier else Modifier.drawBehind {
+                                val e = -tilt() * .9f * density.density
+                                if (kotlin.math.abs(e) > .4f) drawRoundRect(edgeOf(d), topLeft = androidx.compose.ui.geometry.Offset(0f, e),
+                                    size = size, cornerRadius = androidx.compose.ui.geometry.CornerRadius(18.dp.toPx()))
+                            })
                             .onGloballyPositioned { if (isOpen) onOpenBounds(it.boundsInRoot()) }
                             // One gesture handler for both (a separate clickable would grab the touch first):
                             // quick tap → lift / open; hold still ~0.4 s → pick up and drag; move straight away → the list scrolls.

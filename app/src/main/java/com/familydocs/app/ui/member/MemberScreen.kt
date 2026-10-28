@@ -322,7 +322,7 @@ private class RubberBand(private val scope: kotlinx.coroutines.CoroutineScope) :
     private var loop: kotlinx.coroutines.Job? = null
     private fun lean(dy: Float) {
         if (dy == 0f) return
-        target = (target * .75f + dy * .25f * .18f).coerceIn(-9f, 9f)  // dy in px (≈ .5° per dp of finger travel per frame)
+        target = (target * .55f + dy * .45f * .18f).coerceIn(-9f, 9f)  // dy in px: the lean follows the finger's speed
         lastInput = System.nanoTime()
         if (loop?.isActive == true) return
         loop = scope.launch {
@@ -330,8 +330,8 @@ private class RubberBand(private val scope: kotlinx.coroutines.CoroutineScope) :
             while (true) {
                 val now = androidx.compose.runtime.withFrameNanos { it }
                 val dt = ((now - last) / 1e9f).coerceIn(0f, .032f); last = now
-                if (System.nanoTime() - lastInput > 70_000_000L) target *= Math.pow(.02, dt.toDouble()).toFloat()
-                val k = 170f; val c = 2f * .9f * kotlin.math.sqrt(k)
+                if (System.nanoTime() - lastInput > 60_000_000L) target *= Math.pow(.004, dt.toDouble()).toFloat()
+                val k = 480f; val c = 2f * .82f * kotlin.math.sqrt(k) // stiff: follows at once and settles fast, like something with weight
                 velocity += (k * (target - tilt) - c * velocity) * dt
                 tilt += velocity * dt
                 if (abs(target) < .01f && abs(tilt) < .01f && abs(velocity) < .05f) { tilt = 0f; velocity = 0f; target = 0f; break }
@@ -343,9 +343,9 @@ private class RubberBand(private val scope: kotlinx.coroutines.CoroutineScope) :
         lean(consumed.y)
         if (source != NestedScrollSource.UserInput || available.y == 0f) return Offset.Zero
         settle?.cancel()
-        val resist = 1f / (1f + abs(value) / 320f)
-        value = (value + available.y * .5f * resist).coerceIn(-420f, 620f)
-        lean(available.y)   // stretching / squishing at the ends leans them too
+        val resist = 1f / (1f + abs(value) / 140f)
+        value = (value + available.y * .3f * resist).coerceIn(-180f, 260f)
+        lean(available.y * .5f)   // stretching / squishing at the ends leans them a little too
         return Offset(0f, available.y)
     }
 
@@ -353,7 +353,7 @@ private class RubberBand(private val scope: kotlinx.coroutines.CoroutineScope) :
         if (value == 0f) return Velocity.Zero
         val from = value
         settle = scope.launch {
-            animate(from, 0f, animationSpec = spring(dampingRatio = .55f, stiffness = 170f)) { v, _ -> value = v }
+            animate(from, 0f, animationSpec = spring(dampingRatio = .75f, stiffness = 320f)) { v, _ -> value = v }
         }
         return available // the release springs the cards back instead of flinging the list
     }
