@@ -122,8 +122,8 @@ fun FamilyScreen(onMember: (String) -> Unit, onSettings: () -> Unit, onDocument:
         }, label = "groupSwitch") { g -> GroupHome(g, onMember, onSettings, onDocument, onEvent, onNewEvent) }
     }
     when (sheet) {
-        "create" -> GroupSheet("New group", "Its own people, Common vault, events and code. You're in every group.", "Group name, e.g. Flatmates", "Create group",
-            onDismiss = { sheet = null }) { name -> val g = app.repo.createGroup(name); app.selectGroup(g.id); app.settings.update { it.copy(groupIntroDone = true) }; settingsFor = Triple(g.id, "created", null); null }
+        "create" -> NewGroupSheet(onCreated = { g -> app.selectGroup(g.id); app.settings.update { it.copy(groupIntroDone = true) }; settingsFor = Triple(g.id, "created", null) },
+            onDismiss = { sheet = null })
         "join" -> JoinGroupSheet(onJoined = { id, from ->
             app.selectGroup(id)
             if (from != null) settingsFor = Triple(id, "joined", from)
@@ -257,8 +257,9 @@ private fun greeting(): String = when (Calendar.getInstance().get(Calendar.HOUR_
 }
 
 /**
- * Home header: the group's name (always, instead of "Lararium"), its code underneath (fainter) and a ▾ to switch
- * groups (or ＋ to add one when there are none). The name and code roll to the new group; the menu unfolds below.
+ * Home header: the app's name (Bitcount Grid Double) on the left; on the right the theme and lock buttons, the group's
+ * round picture (tap it for the group menu, or ＋ when there's no group yet) and your own picture (Settings).
+ * The menu unfolds below: a big group picture, its name and code, Group settings, your other groups, New group, Join.
  */
 @Composable
 private fun GroupHeader(groups: List<com.familydocs.app.data.GroupEntity>, gid: String?, onSettings: () -> Unit, onCreate: () -> Unit, onJoin: () -> Unit,
@@ -271,27 +272,20 @@ private fun GroupHeader(groups: List<com.familydocs.app.data.GroupEntity>, gid: 
     val toast = com.familydocs.app.ui.ds.LocalToast.current
     var open by remember { mutableStateOf(false) }
     val current = groups.firstOrNull { it.id == gid }
-    val turn by animateFloatAsState(if (open) 180f else 0f, spring(dampingRatio = .6f, stiffness = 380f), label = "groupChevron")
+    val ring by androidx.compose.animation.animateColorAsState(if (open) c.accent else c.accent.copy(alpha = .55f), tween(200), label = "groupRing")
     Column {
-        Row(Modifier.padding(start = 14.dp, end = 20.dp, top = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically,
+        Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Column(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).clickable { if (groups.isEmpty()) onCreate() else open = !open }
-                .padding(horizontal = 6.dp, vertical = 2.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    AnimatedContent(current?.name ?: "Lararium", Modifier.weight(1f, fill = false), transitionSpec = {
-                        (slideInVertically(tween(320, easing = FdEase)) { it / 2 } + fadeIn(tween(240, 60))) togetherWith (slideOutVertically(tween(260)) { -it / 2 } + fadeOut(tween(160)))
-                    }, label = "groupName") { name -> Text(name, style = fdText(22f, FontWeight.Bold, spacing = .01f), maxLines = 1, overflow = TextOverflow.Ellipsis) }
-                    if (groups.isEmpty()) FdIcon("plus", 18.dp, tint = c.muted, description = "Add a group")
-                    else FdIcon("chev", 16.dp, tint = c.muted, description = "Switch group", modifier = Modifier.graphicsLayer { rotationZ = 90f + turn })
-                }
-                current?.let { cur ->
-                    AnimatedContent(cur.code, transitionSpec = {
-                        (slideInVertically(tween(320, 40, FdEase)) { it } + fadeIn(tween(240, 100))) togetherWith (slideOutVertically(tween(220)) { -it } + fadeOut(tween(140)))
-                    }, label = "groupCode") { code -> Text(code, style = fdText(11.5f, color = c.fg.copy(alpha = .45f), spacing = .08f)) }
-                }
-            }
+            Text("Lararium", style = fdText(27f, color = c.fg, spacing = .02f).copy(fontFamily = com.familydocs.app.ui.ds.Bitcount), modifier = Modifier.weight(1f), maxLines = 1)
             ThemeButton()
             FdIconButton("lock", { app.appLock.lock() }, iconSize = 21.dp, description = "Lock app")
+            // the group's picture: rolls to the new group when you switch
+            Box(Modifier.size(36.dp).clip(CircleShape).clickable { if (groups.isEmpty()) onCreate() else open = !open }, contentAlignment = Alignment.Center) {
+                if (current == null) Box(Modifier.size(34.dp).dashedBorder(c.line, radius = 17.dp), contentAlignment = Alignment.Center) { FdIcon("plus", 18.dp, tint = c.muted, description = "Add a group") }
+                else AnimatedContent(current.id, transitionSpec = {
+                    (scaleIn(spring(dampingRatio = .55f, stiffness = 420f), initialScale = .6f) + fadeIn(tween(160))) togetherWith (scaleOut(tween(140), targetScale = .7f) + fadeOut(tween(120)))
+                }, label = "groupPic") { _ -> GroupPic(current, 34.dp, Modifier.border(1.5.dp, ring, CircleShape).padding(2.5.dp), description = "Group: ${current.name}") }
+            }
             Box(Modifier.clip(CircleShape).clickable(onClick = onSettings)) {
                 FdAvatar(account?.name ?: "", 34.dp, photoFile = self?.photoFile ?: account?.photoFile, character = self?.avatar)
             }
@@ -300,25 +294,39 @@ private fun GroupHeader(groups: List<com.familydocs.app.data.GroupEntity>, gid: 
             exit = shrinkVertically(tween(220, easing = FdEase), shrinkTowards = Alignment.Top) + fadeOut(tween(150))) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp).fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(c.surface)
                 .border(1.dp, c.line, RoundedCornerShape(18.dp)).padding(vertical = 4.dp)) {
-                groups.forEach { g ->
-                    Row(Modifier.fillMaxWidth().clickable { open = false; if (g.id != gid) app.selectGroup(g.id) }.padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(g.name, style = fdText(15f, if (g.id == gid) FontWeight.Bold else FontWeight.Medium))
-                            Text(g.code, style = fdText(11.5f, color = c.fg.copy(alpha = .45f), spacing = .08f))
-                        }
-                        if (g.id == gid) {
-                            FdIconButton("copy", { clipboard.setText(androidx.compose.ui.text.AnnotatedString(g.code)); toast.show("Code copied") }, size = 34.dp, iconSize = 17.dp,
+                current?.let { g ->
+                    Column(Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        val pop = remember { Animatable(.7f) }
+                        LaunchedEffect(g.id) { pop.snapTo(.7f); pop.animateTo(1f, spring(dampingRatio = .55f, stiffness = 380f)) }
+                        GroupPic(g, 92.dp, Modifier.scale(pop.value))
+                        Text(g.name, style = fdText(20f, FontWeight.Bold), modifier = Modifier.padding(top = 10.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(g.code, style = fdText(12.5f, color = c.fg.copy(alpha = .5f), spacing = .08f))
+                            FdIconButton("copy", { clipboard.setText(androidx.compose.ui.text.AnnotatedString(g.code)); toast.show("Code copied") }, size = 30.dp, iconSize = 14.dp,
                                 tint = c.muted, description = "Copy code")
-                            FdIcon("check", 18.dp, tint = c.accent)
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth().clickable { open = false; onGroupSettings(g.id) }.padding(horizontal = 14.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        FdIcon("sliders", 18.dp, tint = c.muted); Text("Group settings", style = fdText(14f), modifier = Modifier.weight(1f))
+                        Text("name, picture, backup, sharing", style = fdText(11.5f, color = c.muted))
+                    }
+                }
+                val others = groups.filter { it.id != gid }
+                if (others.isNotEmpty()) {
+                    Box(Modifier.padding(horizontal = 14.dp).fillMaxWidth().height(1.dp).background(c.line))
+                    others.forEach { g ->
+                        Row(Modifier.fillMaxWidth().clickable { open = false; app.selectGroup(g.id) }.padding(horizontal = 14.dp, vertical = 9.dp),
+                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            GroupPic(g, 30.dp)
+                            Column(Modifier.weight(1f)) {
+                                Text(g.name, style = fdText(15f, FontWeight.Medium))
+                                Text(g.code, style = fdText(11.5f, color = c.fg.copy(alpha = .45f), spacing = .08f))
+                            }
                         }
                     }
                 }
                 Box(Modifier.padding(horizontal = 14.dp).fillMaxWidth().height(1.dp).background(c.line))
-                gid?.let { cur ->
-                    Row(Modifier.fillMaxWidth().clickable { open = false; onGroupSettings(cur) }.padding(horizontal = 14.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)) { FdIcon("sliders", 18.dp, tint = c.muted); Text("Group settings · backup & sharing", style = fdText(14f)) }
-                }
                 Row(Modifier.fillMaxWidth().clickable { open = false; onCreate() }.padding(horizontal = 14.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)) { FdIcon("plus", 18.dp, tint = c.muted); Text("New group", style = fdText(14f)) }
                 Row(Modifier.fillMaxWidth().clickable { open = false; onJoin() }.padding(horizontal = 14.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically,

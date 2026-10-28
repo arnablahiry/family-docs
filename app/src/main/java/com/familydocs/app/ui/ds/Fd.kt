@@ -71,6 +71,9 @@ val DarkColors = FdColors(
 )
 
 /** Abaddon (CC BY 3.0): light for normal text, bold from medium up, as in the demo's @font-face ranges. */
+/** The app's name in the header: Bitcount Grid Double (OFL), a static weight-500 cut. */
+val Bitcount = FontFamily(Font(R.font.bitcount_grid_double, FontWeight.Normal))
+
 val Abaddon = FontFamily(
     Font(R.font.abaddon_light, FontWeight.Light),
     Font(R.font.abaddon_light, FontWeight.Normal),

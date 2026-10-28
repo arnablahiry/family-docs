@@ -2,6 +2,12 @@ package com.familydocs.app.ui.home
 
 import android.content.Intent
 import androidx.compose.foundation.background
+import com.familydocs.app.ui.ds.dashedBorder
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -124,12 +130,30 @@ fun GroupSettingsSheet(groupId: String, intro: String? = null, joinedFrom: Strin
 
     FdSheet(onDismiss) {
         Column(Modifier.heightIn(max = 640.dp).verticalScroll(rememberScrollState())) {
-            SheetTitle(g.name, null)
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(bottom = 14.dp)) {
-                Text("Code ${g.code}", style = fdText(13f, color = c.fg.copy(alpha = .55f), spacing = .06f))
-                FdIconButton("copy", { clipboard.setText(androidx.compose.ui.text.AnnotatedString(g.code)); toast.show("Code copied") }, size = 30.dp, iconSize = 15.dp,
-                    tint = c.muted, description = "Copy code")
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.padding(bottom = 14.dp)) {
+                GroupPic(g, 64.dp)
+                Column {
+                    Text(g.name, style = fdText(18f, FontWeight.Bold))
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Code ${g.code}", style = fdText(13f, color = c.fg.copy(alpha = .55f), spacing = .06f))
+                        FdIconButton("copy", { clipboard.setText(androidx.compose.ui.text.AnnotatedString(g.code)); toast.show("Code copied") }, size = 30.dp, iconSize = 15.dp,
+                            tint = c.muted, description = "Copy code")
+                    }
+                }
             }
+            // ---- name and picture ----
+            Label("Name and picture")
+            var newName by remember(g.id) { mutableStateOf(g.name) }
+            FdInput(newName, { newName = it }, placeholder = "Group name", trailing = if (newName.trim() != g.name && newName.isNotBlank()) {
+                { com.familydocs.app.ui.ds.FdTextButton("Save", { scope.launch { app.repo.renameGroup(g.id, newName); toast.show("Saved") } }) }
+            } else null)
+            Spacer(Modifier.height(10.dp))
+            val context = LocalContext.current
+            val ownPhoto = com.familydocs.app.ui.components.rememberVaultImage(g.photoFile, 300)
+            GroupPicPicker(if (g.photoFile != null) "photo" else "default", ownPhoto,
+                onTemplate = { k -> scope.launch { app.repo.setGroupPicture(g.id, k, null) } },
+                onPhoto = { uri -> scope.launch { readGroupPhoto(context, uri)?.let { (bytes, _) -> app.repo.setGroupPicture(g.id, null, bytes) } } })
+            Spacer(Modifier.height(18.dp))
             when (intro) {
                 "created" -> FdBanner("info", "Backups: by default your Drive keeps you and this group's Common vault; you can switch to the whole group below, any time. " +
                     "To share the group with someone, tap Invite: your phone puts an encrypted copy in your Google Drive (allow Drive access when Google asks) and each person who joins does the same.",
@@ -299,4 +323,86 @@ fun JoinGroupSheet(onJoined: (groupId: String, invitedBy: String?) -> Unit, onDi
         }, Modifier.padding(top = 14.dp), enabled = text.isNotBlank() && !busy)
         Spacer(Modifier.height(12.dp))
     }
+}
+
+
+/** The group's picture: your own photo if set, else its template illustration; round. */
+@Composable
+fun GroupPic(g: com.familydocs.app.data.GroupEntity, size: androidx.compose.ui.unit.Dp, modifier: Modifier = Modifier, description: String? = null) {
+    val photo = com.familydocs.app.ui.components.rememberVaultImage(g.photoFile, 600)
+    val m = modifier.size(size).clip(androidx.compose.foundation.shape.CircleShape)
+    if (photo != null) androidx.compose.foundation.Image(photo, description, m, contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+    else androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(groupArt(g.pic)), description, m, contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+}
+
+@Suppress("UNUSED_PARAMETER")
+fun groupArt(pic: String?): Int = com.familydocs.app.R.drawable.art_group_default
+
+/**
+ * Picture chooser: the illustration, or a photo from the phone's gallery. [selected] is "default" or "photo";
+ * [photo] is a preview of the chosen photo.
+ */
+@Composable
+fun GroupPicPicker(selected: String, photo: androidx.compose.ui.graphics.ImageBitmap?, onTemplate: (String) -> Unit, onPhoto: (android.net.Uri) -> Unit) {
+    val c = Fd.c
+    val app = LocalContainer.current
+    val pick = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()) { uri -> uri?.let(onPhoto) }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+        val item: @Composable (Boolean, String, () -> Unit, @Composable () -> Unit) -> Unit = { on, label, click, pic ->
+            Column(Modifier.clip(RoundedCornerShape(12.dp)).clickable(onClick = click).padding(2.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(Modifier.size(60.dp).border(2.dp, if (on) c.accent else androidx.compose.ui.graphics.Color.Transparent, androidx.compose.foundation.shape.CircleShape).padding(3.dp)) { pic() }
+                Text(label, style = fdText(10.5f, if (on) FontWeight.SemiBold else FontWeight.Normal, if (on) c.fg else c.muted), maxLines = 1)
+            }
+        }
+        item(selected != "photo", "Illustration", { onTemplate(com.familydocs.app.domain.GroupPics.DEFAULT) }) {
+            androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(groupArt(null)), "Illustration", Modifier.fillMaxSize().clip(androidx.compose.foundation.shape.CircleShape),
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+        }
+        item(selected == "photo", if (photo != null) "Your photo" else "Add photo", {
+            app.appLock.expectExternalActivity()
+            pick.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly))
+        }) {
+            if (photo != null) androidx.compose.foundation.Image(photo, "Your photo", Modifier.fillMaxSize().clip(androidx.compose.foundation.shape.CircleShape),
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+            else Box(Modifier.fillMaxSize().dashedBorder(c.line, radius = 22.dp), contentAlignment = Alignment.Center) { FdIcon("image", 18.dp, tint = c.muted) }
+        }
+    }
+}
+
+/** Reads a picked image, square-cropped for a round group picture. */
+suspend fun readGroupPhoto(context: android.content.Context, uri: android.net.Uri): Pair<ByteArray, androidx.compose.ui.graphics.ImageBitmap>? =
+    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        runCatching {
+            val bmp = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }?.let { com.familydocs.app.ocr.Images.decode(it, 900) } ?: return@runCatching null
+            val jpeg = com.familydocs.app.ocr.Images.centerSquareJpeg(bmp, 512)
+            jpeg to (com.familydocs.app.ocr.Images.decode(jpeg, 512) ?: bmp).asImageBitmap()
+        }.getOrNull()
+    }
+
+/** New group: name and picture (the illustration, or your own photo). */
+@Composable
+fun NewGroupSheet(onCreated: (com.familydocs.app.data.GroupEntity) -> Unit, onDismiss: () -> Unit) {
+    val app = LocalContainer.current
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var name by remember { mutableStateOf("") }
+    val pic = com.familydocs.app.domain.GroupPics.DEFAULT
+    var photo by remember { mutableStateOf<Pair<ByteArray, androidx.compose.ui.graphics.ImageBitmap>?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    FdSheet(onDismiss) {
+        SheetTitle("New group", "Its own people, Common vault, events and code. You're in every group.")
+        FdInput(name, { name = it }, placeholder = "Group name, e.g. Flatmates")
+        Label2("Picture")
+        GroupPicPicker(if (photo != null) "photo" else pic, photo?.second, onTemplate = { photo = null },
+            onPhoto = { uri -> scope.launch { readGroupPhoto(context, uri)?.let { photo = it } } })
+        FdButton(if (busy) "Creating…" else "Create group", {
+            scope.launch { busy = true; val g = app.repo.createGroup(name, pic, photo?.first); busy = false; onCreated(g); onDismiss() }
+        }, Modifier.padding(top = 16.dp), enabled = name.isNotBlank() && !busy)
+        Spacer(Modifier.height(12.dp))
+    }
+}
+
+@Composable
+private fun Label2(text: String) {
+    Text(text.uppercase(), style = fdText(11f, FontWeight.SemiBold, Fd.c.muted, spacing = .08f), modifier = Modifier.padding(top = 16.dp, bottom = 8.dp))
 }

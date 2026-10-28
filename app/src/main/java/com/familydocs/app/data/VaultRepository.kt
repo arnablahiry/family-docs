@@ -44,8 +44,10 @@ class VaultRepository(private val dao: VaultDao, val files: FileStore) {
     val allDocuments: Flow<List<DocumentEntity>> = groupId.flatMapLatest { documentsOf(it) }
 
     /** A new group with its own Common vault and a fresh code. */
-    suspend fun createGroup(name: String): GroupEntity = withContext(Dispatchers.IO) {
-        val g = GroupEntity(UUID.randomUUID().toString(), name.trim().ifBlank { "Family" }, com.familydocs.app.domain.GroupCodes.new())
+    suspend fun createGroup(name: String, pic: String? = null, photo: ByteArray? = null): GroupEntity = withContext(Dispatchers.IO) {
+        val n = name.trim().ifBlank { "Family" }
+        val g = GroupEntity(UUID.randomUUID().toString(), n, com.familydocs.app.domain.GroupCodes.new(),
+            pic = pic ?: com.familydocs.app.domain.GroupPics.DEFAULT, photoFile = photo?.let { files.put(it) })
         dao.upsertGroup(g)
         dao.upsertMember(MemberEntity(UUID.randomUUID().toString(), "Common", "Shared", photoFile = null, createdAt = 0L, shared = true, groupId = g.id))
         onChanged()
@@ -55,6 +57,13 @@ class VaultRepository(private val dao: VaultDao, val files: FileStore) {
     /** Group setting: back up the whole group to your Drive, or only you and the Common vault. */
     suspend fun setGroupBackup(id: String, all: Boolean) = withContext(Dispatchers.IO) {
         dao.groupNow(id)?.let { dao.upsertGroup(it.copy(backupAll = all)); onChanged() }
+    }
+    /** Group picture: a template ([pic]) or your own [photo] (replaces the old photo). */
+    suspend fun setGroupPicture(id: String, pic: String?, photo: ByteArray?) = withContext(Dispatchers.IO) {
+        val g = dao.groupNow(id) ?: return@withContext
+        if (photo != null || pic != null) files.delete(g.photoFile)
+        dao.upsertGroup(g.copy(pic = pic ?: g.pic, photoFile = photo?.let { files.put(it) }))
+        onChanged()
     }
     suspend fun renameGroup(id: String, name: String) = withContext(Dispatchers.IO) {
         dao.groupNow(id)?.let { dao.upsertGroup(it.copy(name = name.trim().ifEmpty { it.name })); onChanged() }

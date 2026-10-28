@@ -34,6 +34,9 @@ data class GroupEntity(
     val shareIndex: String? = null,
     /** People whose shares you read: JSON [{"key":…,"name":…,"index":…,"at":…}]. */
     val peers: String? = null,
+    /** Group picture: a template ("family", "friends", "office", "flat"); [photoFile] (your own photo) wins when set. */
+    val pic: String? = null,
+    val photoFile: String? = null,
 ) {
     val peerList: List<Peer> get() = Peer.decode(peers)
 }

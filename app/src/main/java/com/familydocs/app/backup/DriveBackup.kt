@@ -127,6 +127,13 @@ class DriveBackup(
         // My Drive › Lararium › <your folder> (your documents are in every group) and one folder per group
         // (Family, Flatmates…) holding that group's people. Existing folders are moved in, not uploaded again.
         val groupFolders = s.groups.associate { g -> g.id to drive.folder(g.name, root, mapOf(P_GROUP to g.id), "Lararium group · its people, Common vault and events") }
+        // Group pictures you picked from your gallery (templates are just a name in the index)
+        s.groups.forEach { g ->
+            val folder = groupFolders.getValue(g.id)
+            if (!same("gphoto:${g.id}", g.photoFile ?: "-")) g.photoFile?.let { files.get(it) }?.let { photo ->
+                drive.upsertFile(folder, "group-photo.jpg.fdenc", seal(photo), OCTET, mapOf(P_KIND to "group-photo", P_DOC_FILE to "group:${g.id}:photo"), null, P_DOC_FILE)
+            }
+        }
         val memberFolders = mutableMapOf<String, String>()
         s.members.forEach { m ->
             val title = if (m.shared) "${m.name} (shared)" else m.name
@@ -224,7 +231,7 @@ class DriveBackup(
             .put("account", s.account?.let { accountJson(it) } ?: JSONObject.NULL)
             .put("members", JSONArray(s.members.map { memberJson(it) }))
             .put("groups", JSONArray(s.groups.map { JSONObject().put("id", it.id).put("name", it.name).put("code", it.code).put("created", it.createdAt)
-                .put("all", it.backupAll).put("shareFolder", it.shareFolder ?: JSONObject.NULL).put("shareIndex", it.shareIndex ?: JSONObject.NULL).put("peers", it.peers ?: JSONObject.NULL) }))
+                .put("all", it.backupAll).put("pic", it.pic ?: JSONObject.NULL).put("photo", it.photoFile != null).put("shareFolder", it.shareFolder ?: JSONObject.NULL).put("shareIndex", it.shareIndex ?: JSONObject.NULL).put("peers", it.peers ?: JSONObject.NULL) }))
             .put("documents", JSONArray(s.documents.map { JSONObject().put("id", it.id).put("member", it.memberId).put("order", it.sortOrder ?: JSONObject.NULL) }))
         val indexText = index.toString()
         if (!same("index", sha(indexText))) drive.upsertFile(root, "Lararium vault.fdenc", seal(indexText.toByteArray()), OCTET, mapOf(P_KIND to "index", P_DOC_FILE to "index"),
@@ -303,12 +310,15 @@ class DriveBackup(
             }
         }.orEmpty()
         // Everything downloaded and decrypted: only now replace what's on the phone.
+        // (groups before saving: a group's own photo is one of the downloaded files)
+        val groups = index.optJSONArray("groups")?.let { a -> (0 until a.length()).map { a.getJSONObject(it) }
+            .map { com.familydocs.app.data.GroupEntity(it.getString("id"), it.getString("name"), it.getString("code"), it.optLong("created"),
+                backupAll = it.optBoolean("all"), shareFolder = it.str("shareFolder"), shareIndex = it.str("shareIndex"), peers = it.str("peers"),
+                pic = it.str("pic"), photoFile = if (it.optBoolean("photo")) drive.findByProp(P_DOC_FILE, "group:${it.getString("id")}:photo")
+                    ?.let { f -> ("g-" + it.getString("id")).also { id -> blobs[id] = open(drive.download(f.id)) } } else null) } }.orEmpty()
         onProgress("Saving to this phone…")
         files.clear()
         blobs.forEach { (id, data) -> files.put(data, id) }
-        val groups = index.optJSONArray("groups")?.let { a -> (0 until a.length()).map { a.getJSONObject(it) }
-            .map { com.familydocs.app.data.GroupEntity(it.getString("id"), it.getString("name"), it.getString("code"), it.optLong("created"),
-                backupAll = it.optBoolean("all"), shareFolder = it.str("shareFolder"), shareIndex = it.str("shareIndex"), peers = it.str("peers")) } }.orEmpty()
         repo.restore(VaultRepository.Snapshot(account, memberEntities, docs, pws, events, groups))
         keys.install(k)
         com.familydocs.app.events.EventReminders.rescheduleAll(context, events)
