@@ -363,7 +363,8 @@ fun FdWalletCard(
             }
         }
         // `.wopen`: shown on the lifted card, bottom-right, over every template.
-        androidx.compose.animation.AnimatedVisibility(open, Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = 12.dp),
+        // Just under the header row, so the card's dates at the bottom stay visible while it's lifted.
+        androidx.compose.animation.AnimatedVisibility(open, Modifier.align(Alignment.TopStart).padding(start = 16.dp, top = 50.dp),
             enter = fadeIn(tween(250, 200)), exit = fadeOut(tween(120))) {
             Box(Modifier.clip(RoundedCornerShape(99.dp)).background(if (paper) hue.copy(alpha = .16f) else Color.White.copy(alpha = .22f)).padding(horizontal = 9.dp, vertical = 3.dp)) {
                 Text("Tap again to open", style = fdText(10.5f, color = ink))
@@ -372,13 +373,12 @@ fun FdWalletCard(
     }
 }
 
-/** `.wbot`: Holder on the left, the card's dates on the right (hidden under the "Tap again" pill while lifted). */
+/** `.wbot`: Holder on the left, the card's dates on the right. */
 @Composable
 private fun CardBottom(holder: String, dates: List<Pair<String, String>>, open: Boolean, ink: Color) {
-    val fade by animateFloatAsState(if (open) 0f else 1f, tween(150), label = "rightLabel")
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
         CardLabel("HOLDER", holder.uppercase(), ink, Modifier.weight(1f, fill = false))
-        if (dates.isNotEmpty()) Row(Modifier.alpha(fade).padding(start = 12.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        if (dates.isNotEmpty()) Row(Modifier.padding(start = 12.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             dates.forEach { (l, v) -> CardLabel(l, v.uppercase(), ink, end = true) }
         }
     }
@@ -498,7 +498,13 @@ fun FdWalletStack(
         }
         val latestReorder by rememberUpdatedState(onReorder)
 
-        val openIndex = if (dragId != null) -1 else order.indexOfFirst { it.id == expandedId }
+        // Just dropped: for a moment the cards below make room so it lands fully visible, then they slide back.
+        var landingId by remember { mutableStateOf<String?>(null) }
+        val openIndex = when {
+            dragId != null -> -1
+            landingId != null -> order.indexOfFirst { it.id == landingId }
+            else -> order.indexOfFirst { it.id == expandedId }
+        }
         val tops = ArrayList<Dp>(order.size)
         order.indices.forEach { i -> tops += if (i == 0) 0.dp else tops[i - 1] + if (openIndex == i - 1) cardH + gap else strip }
         // tap on a card: lift it, or open it when it's already lifted (looked up by id: positions change when reordering)
@@ -576,6 +582,8 @@ fun FdWalletStack(
                                             // (measured from the card's own animated slot position, so the hand-over is seamless)
                                             dropOffset = fingerY - top.toPx()
                                             dragId = null; dragDy = 0f
+                                            landingId = d.id
+                                            animScope.launch { kotlinx.coroutines.delay(560); if (landingId == d.id) landingId = null }
                                             animScope.launch {
                                                 androidx.compose.animation.core.animate(dropOffset, 0f, animationSpec = spring(dampingRatio = .55f, stiffness = 320f)) { v, _ -> dropOffset = v }
                                             }
