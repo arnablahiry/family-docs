@@ -31,6 +31,8 @@ class AppContainer(context: Context) {
     val google = GoogleAccountHelper(app)
     /** Outlives any screen: sign out and delete account keep running after the vault UI disappears. */
     val appScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main.immediate)
+    /** In-app updates from the GitHub releases (checked at app start; Settings › About shows and installs them). */
+    val updater = com.familydocs.app.update.AppUpdater(app)
     val backup: DriveBackup by lazy { DriveBackup(app, repo, files, BackupKeyStore(app, crypto)) }
 
     /** Turns the daily Drive backup (plus one after each change) on or off; [now] also queues one right away. */

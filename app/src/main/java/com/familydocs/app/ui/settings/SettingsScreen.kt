@@ -240,6 +240,7 @@ fun SettingsScreen(onBack: () -> Unit, onEditAccount: () -> Unit, onChangePassco
             FdList {
                 FdListItem("Family Docs ${version.substringBeforeLast('.').ifBlank { version }}",
                     "${members.size} people · ${docs.size} documents on this phone", first = true, icon = "info")
+                UpdateRow(app.updater) { app.appLock.expectExternalActivity() }
             }
             com.familydocs.app.ui.ds.FdMadeWith(Modifier.padding(top = 26.dp, bottom = 30.dp))
         }
@@ -365,5 +366,31 @@ private fun DriveTree(repo: VaultRepository, viewable: Boolean) {
                 }
             }
         }
+    }
+}
+
+/** Settings › About: check for, download and install a newer release from GitHub (see AppUpdater). */
+@Composable
+private fun UpdateRow(updater: com.familydocs.app.update.AppUpdater, beforeLeavingApp: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    val u by updater.state.collectAsStateWithLifecycle()
+    androidx.compose.runtime.LaunchedEffect(Unit) { if (u !is com.familydocs.app.update.AppUpdater.State.Downloading) updater.check() }
+    when (val st = u) {
+        is com.familydocs.app.update.AppUpdater.State.Available -> {
+            val mb = if (st.release.bytes > 0) " (${st.release.bytes / 1_000_000} MB)" else ""
+            FdListItem("Update to ${st.release.version}",
+                if (updater.canInstall()) "Download$mb and install · everything on this phone stays"
+                else "First allow Family Docs to install apps (one switch), then tap again",
+                icon = "cloud", onClick = { beforeLeavingApp(); scope.launch { updater.downloadAndInstall(st.release) } })
+        }
+        is com.familydocs.app.update.AppUpdater.State.Downloading ->
+            FdListItem("Downloading ${st.release.version}…", "${(st.progress * 100).toInt()}% · the installer opens when it's done", icon = "cloud")
+        com.familydocs.app.update.AppUpdater.State.Checking -> FdListItem("Checking for updates…", null, icon = "refresh")
+        com.familydocs.app.update.AppUpdater.State.UpToDate -> FdListItem("Up to date", "You have the latest version", icon = "check",
+            onClick = { scope.launch { updater.check() } }, chevron = false)
+        is com.familydocs.app.update.AppUpdater.State.Failed -> FdListItem("Update didn't finish", "${st.message} Tap to try again.", icon = "info",
+            onClick = { scope.launch { updater.check() } })
+        com.familydocs.app.update.AppUpdater.State.Idle -> FdListItem("Check for updates", "Needs an internet connection", icon = "refresh",
+            onClick = { scope.launch { updater.check() } })
     }
 }

@@ -50,6 +50,7 @@ import com.familydocs.app.domain.maskValue
 import com.familydocs.app.security.ThemeMode
 import com.familydocs.app.ui.components.LocalContainer
 import com.familydocs.app.ui.components.LocalThemeReveal
+import com.familydocs.app.ui.ds.FdBanner
 import com.familydocs.app.ui.ds.Fd
 import com.familydocs.app.ui.ds.FdAvatar
 import com.familydocs.app.ui.ds.FdDocIcon
@@ -103,6 +104,13 @@ fun FamilyScreen(onMember: (String) -> Unit, onSettings: () -> Unit, onDocument:
             Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp)) {
                 Text("${greeting()}, ${account?.name?.substringBefore(' ').orEmpty()}", style = fdText(14f, color = c.muted))
                 FdInput(query, { query = it }, Modifier.padding(top = 14.dp), placeholder = "Search documents, numbers…", icon = "search")
+                // A newer version on GitHub: a quiet hint; Settings › About downloads and installs it.
+                val update by app.updater.state.collectAsStateWithLifecycle()
+                (update as? com.familydocs.app.update.AppUpdater.State.Available)?.let { a ->
+                    FdBanner("cloud", "Family Docs ${a.release.version} is available", Modifier.padding(top = 12.dp).clickable(onClick = onSettings)) {
+                        Text("Update", style = fdText(12.5f, FontWeight.SemiBold, c.primary))
+                    }
+                }
             }
         }
 

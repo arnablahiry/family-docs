@@ -543,7 +543,9 @@ fun FdWalletStack(
                         else Modifier.offset { IntOffset(0, (top.toPx() + extra(i) + dropOffset).roundToInt()) }
                     FdWalletCard(
                         d, holderFallback, isOpen || dragging,
-                        Modifier.zIndex(if (dragging) 1000f else i.toFloat()).then(place).height(cardH).alpha(dim)
+                        // Stays on top while held and while landing; then takes its place in the stack so the cards
+                        // below close up over it (no snap behind them at the end).
+                        Modifier.zIndex(if (dragging || d.id == landingId) 1000f else i.toFloat()).then(place).height(cardH).alpha(dim)
                             .graphicsLayer { scaleX = lift; scaleY = lift }
                             .onGloballyPositioned { if (isOpen) onOpenBounds(it.boundsInRoot()) }
                             // One gesture handler for both (a separate clickable would grab the touch first):
