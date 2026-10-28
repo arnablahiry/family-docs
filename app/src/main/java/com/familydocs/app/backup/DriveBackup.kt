@@ -188,7 +188,7 @@ class DriveBackup(
             .put("format", 2)
             .put("account", s.account?.let { accountJson(it) } ?: JSONObject.NULL)
             .put("members", JSONArray(s.members.map { memberJson(it) }))
-            .put("documents", JSONArray(s.documents.map { JSONObject().put("id", it.id).put("member", it.memberId) }))
+            .put("documents", JSONArray(s.documents.map { JSONObject().put("id", it.id).put("member", it.memberId).put("order", it.sortOrder ?: JSONObject.NULL) }))
         drive.upsertFile(root, "Family Docs vault.fdenc", seal(index.toString().toByteArray()), OCTET, mapOf(P_KIND to "index", P_DOC_FILE to "index"),
             "Index of people and documents, encrypted", P_DOC_FILE)
         // Events (dates, who's going, who can see them, pinned documents, reminder, notes, photo): one encrypted file.
@@ -239,6 +239,10 @@ class DriveBackup(
                 docs += docFromJson(dj, fileId, picId).copy(moreFiles = Attachment.encode(more))
             }
         }
+        // Card order (hold and drag) lives in the index, so reordering doesn't re-upload documents.
+        val order = index.optJSONArray("documents")?.let { a -> (0 until a.length()).map { a.getJSONObject(it) }
+            .filter { !it.isNull("order") }.associate { it.getString("id") to it.getInt("order") } }.orEmpty()
+        docs.replaceAll { d -> order[d.id]?.let { d.copy(sortOrder = it) } ?: d }
         var accountPhoto: String? = null
         rootChildren.firstOrNull { it.props[P_KIND] == "account-photo" }?.let { f -> accountPhoto = "account-photo"; blobs["account-photo"] = open(drive.download(f.id)) }
         val account = index.optJSONObject("account")?.let { accountFromJson(it, accountPhoto) }

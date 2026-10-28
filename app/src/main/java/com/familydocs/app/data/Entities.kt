@@ -77,6 +77,8 @@ data class DocumentEntity(
     val showFlag: Boolean? = null,
     /** Files after the first one ([fileId]), in order: JSON [{"id":…,"mime":…}]. Added in database version 5. */
     val moreFiles: String? = null,
+    /** Position in the person's wallet, set by hold-and-drag (null = in the order added). Added in database version 6. */
+    val sortOrder: Int? = null,
 ) {
     /** Every file of the document (front, back, more pages…), in order. */
     val attachments: List<Attachment> get() = listOfNotNull(fileId?.let { Attachment(it, fileMime ?: "image/jpeg") }) + Attachment.decode(moreFiles)

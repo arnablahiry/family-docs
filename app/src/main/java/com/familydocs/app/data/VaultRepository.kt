@@ -131,6 +131,12 @@ class VaultRepository(private val dao: VaultDao, val files: FileStore) {
         onChanged()
     }
 
+    /** New order of a person's cards after hold-and-drag: [ids] top to bottom. */
+    suspend fun reorderDocuments(ids: List<String>) = withContext(Dispatchers.IO) {
+        ids.forEachIndexed { i, id -> dao.setDocumentOrder(id, i) }
+        onChanged()
+    }
+
     suspend fun deleteDocument(id: String) = withContext(Dispatchers.IO) {
         dao.documentNow(id)?.let { it.attachments.forEach { a -> files.delete(a.id) }; files.delete(it.pictureFile) }
         dao.deleteDocument(id)

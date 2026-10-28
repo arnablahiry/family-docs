@@ -53,9 +53,17 @@ val MIGRATION_4_5 = object : Migration(4, 5) {
     }
 }
 
+/** v6: the order of a person's cards (hold and drag). NULL = in the order added. Nothing existing changes. */
+val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE documents ADD COLUMN sortOrder INTEGER")
+    }
+}
+
 val ALL_MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_1_2,
     MIGRATION_2_3,
     MIGRATION_3_4,
     MIGRATION_4_5,
+    MIGRATION_5_6,
 )

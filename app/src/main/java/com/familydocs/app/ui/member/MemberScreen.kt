@@ -173,6 +173,12 @@ fun MemberScreen(memberId: String, onBack: () -> Unit, onEdit: () -> Unit, onPas
                             modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp),
                             owner = m,
                             onOpenBounds = { openBounds = it },
+                            onReorder = { newShown ->
+                                // Only the visible cards moved: hidden ones (other countries) keep their places.
+                                val moved = newShown.iterator(); val shownIds = newShown.toSet()
+                                val full = docs.map { d -> if (d.id in shownIds) moved.next() else d.id }
+                                scope.launch { app.repo.reorderDocuments(full) }
+                            },
                         )
                     }
                 }

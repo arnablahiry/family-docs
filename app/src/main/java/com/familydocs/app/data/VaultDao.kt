@@ -27,7 +27,8 @@ interface VaultDao {
     @Transaction
     suspend fun deleteMember(id: String) { deleteDocumentsOf(id); deletePasswordsOf(id); deleteMemberRow(id) }
 
-    @Query("SELECT * FROM documents WHERE memberId = :memberId AND eventId IS NULL ORDER BY createdAt") fun documents(memberId: String): Flow<List<DocumentEntity>>
+    @Query("SELECT * FROM documents WHERE memberId = :memberId AND eventId IS NULL ORDER BY sortOrder IS NULL, sortOrder, createdAt") fun documents(memberId: String): Flow<List<DocumentEntity>>
+    @Query("UPDATE documents SET sortOrder = :order WHERE id = :id") suspend fun setDocumentOrder(id: String, order: Int)
     @Query("SELECT * FROM documents ORDER BY createdAt") fun allDocuments(): Flow<List<DocumentEntity>>
     @Query("SELECT * FROM documents") suspend fun allDocumentsNow(): List<DocumentEntity>
     @Query("SELECT * FROM documents WHERE memberId = :memberId") suspend fun documentsNow(memberId: String): List<DocumentEntity>

@@ -21,6 +21,16 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import kotlin.math.roundToInt
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.key
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -416,6 +426,7 @@ private fun CardFold(back: Color, fold: Color, modifier: Modifier) {
  * The stacked wallet. Cards overlap leaving a 58dp strip. The first tap on ANY card (the last one too) lifts it out
  * whole; the cards below slide down out of its way and the other cards dim. A second tap opens it; a tap anywhere else
  * (handled by the screen, see MemberScreen) or Back puts it back.
+ * Hold a card and drag it up or down to move it; [onReorder] gets the new order, top to bottom.
  */
 @Composable
 fun FdWalletStack(
@@ -423,31 +434,77 @@ fun FdWalletStack(
     onExpand: (id: String?, topPx: Float) -> Unit, onOpen: (DocumentEntity) -> Unit, modifier: Modifier = Modifier,
     owner: com.familydocs.app.data.MemberEntity? = null,
     onOpenBounds: (androidx.compose.ui.geometry.Rect) -> Unit = {},
+    onReorder: ((List<String>) -> Unit)? = null,
 ) {
     BoxWithConstraints(modifier.fillMaxWidth()) {
         val cardH = maxWidth / 1.586f
         val strip = 58.dp
         val gap = 16.dp
-        val openIndex = docs.indexOfFirst { it.id == expandedId }
-        val tops = ArrayList<Dp>(docs.size)
-        docs.indices.forEach { i -> tops += if (i == 0) 0.dp else tops[i - 1] + if (openIndex == i - 1) cardH + gap else strip }
-        val total = if (docs.isEmpty()) 0.dp else tops.last() + cardH
-        val height by animateDpAsState(total, tween(450, easing = FdEase), label = "stackH")
         val density = LocalDensity.current
+        val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+        val stripPx = with(density) { strip.toPx() }
+
+        // ---- hold and drag ----
+        var dragId by remember { mutableStateOf<String?>(null) }
+        var dragDy by remember { mutableFloatStateOf(0f) }
+        // The new order stays on screen until the database sends it back, so cards don't jump back for a frame.
+        var pending by remember { mutableStateOf<List<String>?>(null) }
+        val ids = docs.map { it.id }
+        LaunchedEffect(ids) { if (pending == ids || pending?.toSet() != ids.toSet()) pending = null }
+        val base = pending?.takeIf { it.toSet() == ids.toSet() }?.map { id -> docs.first { it.id == id } } ?: docs
+        val from = base.indexOfFirst { it.id == dragId }
+        val target = if (from >= 0) (from + (dragDy / stripPx).roundToInt()).coerceIn(0, base.lastIndex) else -1
+        val order = if (from >= 0 && target != from) base.toMutableList().apply { add(target, removeAt(from)) } else base
+        val latestBase by rememberUpdatedState(base)
+        val latestReorder by rememberUpdatedState(onReorder)
+
+        val openIndex = if (dragId != null) -1 else order.indexOfFirst { it.id == expandedId }
+        val tops = ArrayList<Dp>(order.size)
+        order.indices.forEach { i -> tops += if (i == 0) 0.dp else tops[i - 1] + if (openIndex == i - 1) cardH + gap else strip }
+        val total = if (order.isEmpty()) 0.dp else tops.last() + cardH
+        val height by animateDpAsState(total, tween(450, easing = FdEase), label = "stackH")
         Box(Modifier.fillMaxWidth().height(height)) {
-            docs.forEachIndexed { i, d ->
-                val top by animateDpAsState(tops[i], tween(450, easing = FdEase), label = "cardTop")
-                val isOpen = i == openIndex
-                val dim by animateFloatAsState(if (openIndex >= 0 && !isOpen) .45f else 1f, tween(300), label = "cardDim")
-                FdWalletCard(
-                    d, holderFallback, isOpen,
-                    Modifier.zIndex(i.toFloat()).offset(y = top).height(cardH).alpha(dim)
-                        .onGloballyPositioned { if (isOpen) onOpenBounds(it.boundsInRoot()) }
-                        .tap { if (isOpen) onOpen(d) else onExpand(d.id, with(density) { tops[i].toPx() }) },
-                    photoFile = owner?.photoFile, character = owner?.avatar, shared = owner?.shared == true,
-                )
+            order.forEachIndexed { i, d ->
+                key(d.id) {
+                    val dragging = d.id == dragId
+                    val top by animateDpAsState(tops[i], tween(if (dragId != null) 220 else 450, easing = FdEase), label = "cardTop")
+                    val isOpen = i == openIndex
+                    val dim by animateFloatAsState(if (openIndex >= 0 && !isOpen) .45f else 1f, tween(300), label = "cardDim")
+                    val lift by animateFloatAsState(if (dragging) 1.03f else 1f, tween(180), label = "cardLift")
+                    // The held card follows the finger; the others slide to make room.
+                    val place = if (dragging) Modifier.offset { IntOffset(0, (from * stripPx + dragDy).roundToInt()) } else Modifier.offset(y = top)
+                    FdWalletCard(
+                        d, holderFallback, isOpen || dragging,
+                        Modifier.zIndex(if (dragging) 1000f else i.toFloat()).then(place).height(cardH).alpha(dim)
+                            .graphicsLayer { scaleX = lift; scaleY = lift }
+                            .onGloballyPositioned { if (isOpen) onOpenBounds(it.boundsInRoot()) }
+                            .pointerInput(d.id, onReorder != null) {
+                                if (onReorder == null) return@pointerInput
+                                detectDragGesturesAfterLongPress(
+                                    onDragStart = {
+                                        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                        onExpand(null, 0f); dragId = d.id; dragDy = 0f
+                                    },
+                                    onDrag = { change, amount -> change.consume(); dragDy += amount.y },
+                                    onDragEnd = {
+                                        val b = latestBase
+                                        val f = b.indexOfFirst { it.id == dragId }
+                                        val t = if (f >= 0) (f + (dragDy / stripPx).roundToInt()).coerceIn(0, b.lastIndex) else -1
+                                        if (f >= 0 && t != f) {
+                                            val newIds = b.map { it.id }.toMutableList().apply { add(t, removeAt(f)) }
+                                            pending = newIds
+                                            latestReorder?.invoke(newIds)
+                                        }
+                                        dragId = null; dragDy = 0f
+                                    },
+                                    onDragCancel = { dragId = null; dragDy = 0f },
+                                )
+                            }
+                            .tap { if (isOpen) onOpen(d) else onExpand(d.id, with(density) { tops[i].toPx() }) },
+                        photoFile = owner?.photoFile, character = owner?.avatar, shared = owner?.shared == true,
+                    )
+                }
             }
         }
     }
 }
-
