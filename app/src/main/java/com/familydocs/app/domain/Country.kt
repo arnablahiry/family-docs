@@ -38,13 +38,17 @@ object Countries {
     fun encode(list: List<String>) = list.joinToString(",")
     fun decode(s: String?) = s?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty().ifEmpty { DEFAULT }
 
-    /** "" when unknown. Order: MRZ issuing state → document type → wording in the scanned text. */
+    /** "" when unknown. Order: MRZ issuing state → document type → wording in the scanned text → the document's name. */
     fun infer(docName: String, fields: List<DocField>, text: String): String {
         fields.firstOrNull { Regex("issuing country|issued by", RegexOption.IGNORE_CASE).containsMatchIn(it.label) && it.value.isNotBlank() }
             ?.let { f -> Regex("\\(([A-Z]{1,3})\\)").find(f.value)?.groupValues?.get(1)?.let { return fromAlpha3(it) ?: it } }
         if (DocTypes.forName(docName).key in setOf("aadhaar", "pan", "voter", "driving")) return "IN"
         if (Regex("₹|GOVT\\. OF INDIA|GOVERNMENT OF INDIA|REPUBLIC OF INDIA", RegexOption.IGNORE_CASE).containsMatchIn(text)) return "IN"
         if (Regex("HELLENIC|ΕΛΛΗΝΙΚΗ|GREECE|\\bAFM\\b|ΑΦΜ|AMKA|ΑΜΚΑ", RegexOption.IGNORE_CASE).containsMatchIn(text)) return "GR"
+        // numbers that belong to one country, named as such ("AFM", "AMKA", "SSN", "National Insurance")
+        if (Regex("\\bAFM\\b|ΑΦΜ|\\bAMKA\\b|ΑΜΚΑ|\\bE?FKA\\b|Ε?ΦΚΑ|TAXIS", RegexOption.IGNORE_CASE).containsMatchIn(docName)) return "GR"
+        if (Regex("\\bSSN\\b", RegexOption.IGNORE_CASE).containsMatchIn(docName)) return "US"
+        if (Regex("national insurance|\\bNINO?\\b", RegexOption.IGNORE_CASE).containsMatchIn(docName)) return "GB"
         return ""
     }
 }

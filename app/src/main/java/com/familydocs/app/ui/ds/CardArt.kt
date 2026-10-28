@@ -26,7 +26,7 @@ import com.familydocs.app.R
 // country's flag, faint and tilted, hill 1, the type's motif image, hills 2 and 3. Colours are always the type's own.
 
 /** National ID cards: these show the issuing country's flag faintly behind the hills. */
-val NATIONAL_CARD_TYPES = setOf("aadhaar", "visa", "residence", "id", "pan", "voter", "social")
+val NATIONAL_CARD_TYPES = setOf("aadhaar", "visa", "residence", "id", "pan", "voter", "social", "tax")
 private const val FLAG_ALPHA = .13f
 
 /** The flag's tilt for a card: 4–12° either way, fixed per document type + country (same hash as the demo). */
@@ -119,14 +119,16 @@ fun CardScene(key: String, hue: Long, country: String?, modifier: Modifier = Mod
         Canvas(Modifier.fillMaxSize()) {
             val k = maxOf(size.width / 160f, size.height / 101f) // preserveAspectRatio xMidYMid slice
             val dx = (size.width - 160f * k) / 2f; val dy = (size.height - 101f * k) / 2f
-            fun X(x: Float) = dx + x * k; fun Y(y: Float) = dy + y * k
+            fun X(x: Float) = dx + x * k
+            fun Y(y: Float) = dy + y * k
             drawPath(hill(0, ::X, ::Y), p[2])
         }
         if (motif != null) Image(painterResource(motif), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         Canvas(Modifier.fillMaxSize()) {
             val k = maxOf(size.width / 160f, size.height / 101f)
             val dx = (size.width - 160f * k) / 2f; val dy = (size.height - 101f * k) / 2f
-            fun X(x: Float) = dx + x * k; fun Y(y: Float) = dy + y * k
+            fun X(x: Float) = dx + x * k
+            fun Y(y: Float) = dy + y * k
             drawPath(hill(1, ::X, ::Y), p[3])
             drawPath(hill(2, ::X, ::Y), p[4])
         }
