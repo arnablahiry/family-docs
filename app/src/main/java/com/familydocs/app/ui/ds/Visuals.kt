@@ -21,6 +21,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.animation.core.spring
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
@@ -486,6 +489,13 @@ fun FdWalletStack(
         val target = if (from >= 0) (from + (dragDy / stripPx).roundToInt()).coerceIn(0, base.lastIndex) else -1
         val order = if (from >= 0 && target != from) base.toMutableList().apply { add(target, removeAt(from)) } else base
         val latestBase by rememberUpdatedState(base)
+        val animScope = rememberCoroutineScope()
+        // a light tick each time the held card passes another one
+        var lastTarget by remember { mutableStateOf(-1) }
+        LaunchedEffect(target) {
+            if (dragId != null && lastTarget >= 0 && target != lastTarget) haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+            lastTarget = if (dragId != null) target else -1
+        }
         val latestReorder by rememberUpdatedState(onReorder)
 
         val openIndex = if (dragId != null) -1 else order.indexOfFirst { it.id == expandedId }
@@ -512,17 +522,25 @@ fun FdWalletStack(
             order.forEachIndexed { i, d ->
                 key(d.id) {
                     val dragging = d.id == dragId
-                    val top by animateDpAsState(tops[i], tween(if (dragId != null) 220 else 450, easing = FdEase), label = "cardTop")
+                    // While a card is held the others make room with a soft, bouncy spring.
+                    val top by animateDpAsState(tops[i], if (dragId != null) spring(dampingRatio = .62f, stiffness = 420f) else tween(450, easing = FdEase), label = "cardTop")
                     val isOpen = i == openIndex
                     val dim by animateFloatAsState(if (openIndex >= 0 && !isOpen) .45f else 1f, tween(300), label = "cardDim")
-                    val lift by animateFloatAsState(if (dragging) 1.03f else 1f, tween(180), label = "cardLift")
+                    // Picked up: pops a little bigger; the cards behind ease back a touch.
+                    val lift by animateFloatAsState(if (dragging) 1.05f else if (dragId != null) .985f else 1f, spring(dampingRatio = .5f, stiffness = 500f), label = "cardLift")
+                    // Tilts slightly in the direction it's moved, like it has weight; settles when the finger rests.
+                    var tiltTarget by remember { mutableFloatStateOf(0f) }
+                    LaunchedEffect(dragging) { while (dragging) { kotlinx.coroutines.delay(40); tiltTarget *= .72f } ; tiltTarget = 0f }
+                    val tilt by animateFloatAsState(if (dragging) tiltTarget else 0f, spring(dampingRatio = .45f, stiffness = 260f), label = "cardTilt")
+                    // On drop the card glides from the finger into its slot and lands with a small overshoot.
+                    var dropOffset by remember { mutableFloatStateOf(0f) }
                     // The held card follows the finger; the others slide to make room.
                     val place = if (dragging) Modifier.offset { IntOffset(0, (from * stripPx + dragDy).roundToInt()) }
-                        else Modifier.offset { IntOffset(0, (top.toPx() + extra(i)).roundToInt()) }
+                        else Modifier.offset { IntOffset(0, (top.toPx() + extra(i) + dropOffset).roundToInt()) }
                     FdWalletCard(
                         d, holderFallback, isOpen || dragging,
                         Modifier.zIndex(if (dragging) 1000f else i.toFloat()).then(place).height(cardH).alpha(dim)
-                            .graphicsLayer { scaleX = lift; scaleY = lift }
+                            .graphicsLayer { scaleX = lift; scaleY = lift; rotationZ = tilt }
                             .onGloballyPositioned { if (isOpen) onOpenBounds(it.boundsInRoot()) }
                             // One gesture handler for both (a separate clickable would grab the touch first):
                             // quick tap → lift / open; hold still ~0.4 s → pick up and drag; move straight away → the list scrolls.
@@ -545,7 +563,12 @@ fun FdWalletStack(
                                         else -> {
                                             haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
                                             onExpand(null, 0f); dragId = d.id; dragDy = 0f
-                                            val ended = drag(down.id) { ch -> dragDy += ch.positionChange().y; ch.consume() }
+                                            val ended = drag(down.id) { ch ->
+                                                val dy = ch.positionChange().y
+                                                dragDy += dy
+                                                tiltTarget = (tiltTarget * .7f + dy * .45f).coerceIn(-4f, 4f)
+                                                ch.consume()
+                                            }
                                             val b = latestBase
                                             val f = b.indexOfFirst { it.id == dragId }
                                             val t = if (f >= 0) (f + (dragDy / stripPx).roundToInt()).coerceIn(0, b.lastIndex) else -1
@@ -554,7 +577,14 @@ fun FdWalletStack(
                                                 pending = newIds
                                                 latestReorder?.invoke(newIds)
                                             }
+                                            // where the card is now (under the finger) relative to where it will rest
+                                            val fingerY = (if (f >= 0) f else 0) * stripPx + dragDy
+                                            // (measured from the card's own animated slot position, so the hand-over is seamless)
+                                            dropOffset = fingerY - top.toPx()
                                             dragId = null; dragDy = 0f
+                                            animScope.launch {
+                                                androidx.compose.animation.core.animate(dropOffset, 0f, animationSpec = spring(dampingRatio = .55f, stiffness = 320f)) { v, _ -> dropOffset = v }
+                                            }
                                         }
                                     }
                                 }
