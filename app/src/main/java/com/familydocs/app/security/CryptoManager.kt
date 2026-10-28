@@ -63,6 +63,8 @@ class CryptoManager(context: Context) {
     fun readSecret(name: String): ByteArray? =
         prefs.getString(name, null)?.let { decrypt(Base64.decode(it, Base64.NO_WRAP)) }
 
+    fun deleteSecret(name: String) { prefs.edit().remove(name).apply() }
+
     fun databasePassphrase(): ByteArray = secret("db_passphrase")
 
     companion object {

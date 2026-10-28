@@ -11,11 +11,11 @@ import androidx.work.WorkerParameters
 import com.familydocs.app.FamilyDocsApp
 import java.util.concurrent.TimeUnit
 
-/** Weekly backup on Wi-Fi. Skips quietly if Drive consent or the backup password is missing. */
+/** Weekly backup on Wi-Fi. Skips quietly if Google Drive access needs the user (Settings shows "Back up now"). */
 class BackupWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
     override suspend fun doWork(): Result {
         val c = (applicationContext as FamilyDocsApp).container
-        if (!c.settings.value.backupEnabled || !c.backup.keys.hasPassword) return Result.success()
+        if (!c.settings.value.backupEnabled) return Result.success()
         val auth = runCatching { c.backup.authorize() }.getOrElse { return Result.retry() }
         if (auth.hasResolution()) return Result.success() // needs the user; Settings shows "Back up now"
         val token = auth.accessToken ?: return Result.retry()
@@ -26,6 +26,13 @@ class BackupWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
 
     companion object {
         private const val NAME = "familydocs-drive-backup"
+
+        /** One backup as soon as there's a connection (after sign-up, or before signing out). */
+        fun runNow(context: Context) {
+            val req = androidx.work.OneTimeWorkRequestBuilder<BackupWorker>()
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build()
+            WorkManager.getInstance(context).enqueueUniqueWork("$NAME-now", androidx.work.ExistingWorkPolicy.REPLACE, req)
+        }
         fun schedule(context: Context, enabled: Boolean) {
             val wm = WorkManager.getInstance(context)
             if (!enabled) { wm.cancelUniqueWork(NAME); return }

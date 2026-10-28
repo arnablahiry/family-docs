@@ -39,8 +39,9 @@ import org.json.JSONObject
  *
  * Every file and folder carries Drive appProperties ("labels": member, document id, type, country, expiry,
  * last-changed time) and a human description, so Drive search works and only changed documents are re-uploaded.
- * Encryption: AES-256-GCM with a key from the backup password (see [BackupCrypto]); names are readable,
- * contents are not. Scope is drive.file, so the app can only see files it created.
+ * Encryption: AES-256-GCM (see [BackupCrypto]) with a random key that lives on the phone and in the Google
+ * account's hidden app folder (scope drive.appdata), so signing in with Google on a new phone is enough to
+ * restore. Names are readable, contents are not. Scope drive.file: the app only sees files it created.
  */
 class DriveBackup(
     private val context: Context,
@@ -48,18 +49,48 @@ class DriveBackup(
     private val files: FileStore,
     val keys: BackupKeyStore,
 ) {
-    fun authorizationRequest(): AuthorizationRequest =
-        AuthorizationRequest.Builder().setRequestedScopes(listOf(Scope(SCOPE))).build()
+    /** Same grant as "Continue with Google"; if the result has a resolution, the UI must launch it once. */
+    suspend fun authorize(): AuthorizationResult =
+        Identity.getAuthorizationClient(context).authorize(com.familydocs.app.auth.GoogleAccountHelper(context).request()).await()
 
-    /** If the result has a resolution, the UI must launch its PendingIntent once for consent. */
-    suspend fun authorize(): AuthorizationResult = Identity.getAuthorizationClient(context).authorize(authorizationRequest()).await()
+    /** The backup key for this Google account: the one already in Drive's hidden app folder wins, so every phone shares it. */
+    private fun keyFor(drive: DriveClient): BackupKeyStore.Key {
+        val remote = drive.appDataRead(KEY_FILE)?.let { runCatching { parseKey(it) }.getOrNull() }
+        val local = keys.current()
+        return when {
+            remote != null -> { if (local == null || !local.id.contentEquals(remote.id)) keys.install(remote); remote }
+            local != null -> local.also { drive.appDataWrite(KEY_FILE, keyJson(it)) }
+            else -> keys.generate().also { drive.appDataWrite(KEY_FILE, keyJson(it)) }
+        }
+    }
+
+    private fun keyJson(k: BackupKeyStore.Key) = JSONObject().put("v", 1)
+        .put("id", android.util.Base64.encodeToString(k.id, android.util.Base64.NO_WRAP))
+        .put("key", android.util.Base64.encodeToString(k.key, android.util.Base64.NO_WRAP)).toString().toByteArray()
+
+    private fun parseKey(b: ByteArray): BackupKeyStore.Key = JSONObject(String(b)).let {
+        BackupKeyStore.Key(android.util.Base64.decode(it.getString("key"), android.util.Base64.NO_WRAP), android.util.Base64.decode(it.getString("id"), android.util.Base64.NO_WRAP))
+    }
+
+    /** True when this Google account already has a Family Docs backup. */
+    suspend fun hasBackup(accessToken: String): Boolean = withContext(Dispatchers.IO) {
+        val drive = DriveClient(accessToken)
+        drive.findByProp(P_ROOT, "1") != null && drive.appDataFind(KEY_FILE) != null
+    }
+
+    /** Permanently removes the Family Docs folder and the backup key from this Google account's Drive. */
+    suspend fun deleteFromDrive(accessToken: String) = withContext(Dispatchers.IO) {
+        val drive = DriveClient(accessToken)
+        drive.findByProp(P_ROOT, "1")?.let { drive.delete(it.id) }
+        drive.appDataDelete(KEY_FILE)
+    }
 
     data class Report(val uploaded: Int, val unchanged: Int, val removed: Int)
 
     suspend fun backup(accessToken: String, viewableCopies: Boolean = false, onProgress: (String) -> Unit = {}): Report = withContext(Dispatchers.IO) {
         val drive = DriveClient(accessToken)
         val s = repo.snapshot()
-        val key = keys.key(); val salt = keys.salt()
+        val k = keyFor(drive); val key = k.key; val salt = k.id
         fun seal(b: ByteArray) = BackupCrypto.seal(b, key, salt)
         val selfName = s.account?.name ?: "Me"
 
@@ -144,18 +175,15 @@ class DriveBackup(
         Report(uploaded, unchanged, removed)
     }
 
-    /** Rebuilds the vault from Drive. Wrong password → exception before anything on the phone changes. */
-    suspend fun restore(accessToken: String, password: CharArray, onProgress: (String) -> Unit = {}) = withContext(Dispatchers.IO) {
+    /** Rebuilds the vault from Drive using the key in the hidden app folder. Any failure → nothing on the phone changes. */
+    suspend fun restore(accessToken: String, onProgress: (String) -> Unit = {}) = withContext(Dispatchers.IO) {
         val drive = DriveClient(accessToken)
         val root = drive.findByProp(P_ROOT, "1") ?: error("No Family Docs backup found in this Google account")
         val indexFile = drive.children(root.id).firstOrNull { it.props[P_KIND] == "index" } ?: error("Backup index is missing")
-        val sealedIndex = drive.download(indexFile.id)
-        val key = BackupCrypto.deriveKey(password, BackupCrypto.saltOf(sealedIndex))
-        val index = JSONObject(String(BackupCrypto.open(sealedIndex, key)))
-        val indexSalt = BackupCrypto.saltOf(sealedIndex)
-        fun open(b: ByteArray): ByteArray = BackupCrypto.saltOf(b).let { salt ->
-            BackupCrypto.open(b, if (salt.contentEquals(indexSalt)) key else BackupCrypto.deriveKey(password, salt))
-        }
+        val k = drive.appDataRead(KEY_FILE)?.let { parseKey(it) } ?: error("This backup's key is missing from Google Drive, so it can't be opened")
+        val key = k.key
+        val index = JSONObject(String(BackupCrypto.open(drive.download(indexFile.id), key)))
+        fun open(b: ByteArray): ByteArray = BackupCrypto.open(b, key)
 
         val blobs = mutableMapOf<String, ByteArray>()
         val members = index.getJSONArray("members").let { a -> (0 until a.length()).map { a.getJSONObject(it) } }
@@ -190,7 +218,7 @@ class DriveBackup(
         files.clear()
         blobs.forEach { (id, data) -> files.put(data, id) }
         repo.restore(VaultRepository.Snapshot(account, memberEntities, docs, pws))
-        keys.setPassword(password)
+        keys.install(k)
     }
 
     // ---------- JSON ----------
@@ -223,7 +251,7 @@ class DriveBackup(
 
     companion object {
         /** drive.file: non-sensitive scope, no Google verification screen, and the app can't see the rest of the user's Drive. */
-        const val SCOPE = "https://www.googleapis.com/auth/drive.file"
+        const val KEY_FILE = "family-docs-backup-key.json"
         private const val OCTET = "application/octet-stream"
         // label keys (Drive appProperties)
         const val P_ROOT = "fd_root"; const val P_MEMBER = "fd_member"; const val P_MEMBER_OF = "fd_member_of"; const val P_DOC = "fd_doc"

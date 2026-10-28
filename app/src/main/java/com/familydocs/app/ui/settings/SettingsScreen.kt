@@ -54,6 +54,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.familydocs.app.backup.BackupWorker
+import com.familydocs.app.auth.GoogleAccountHelper
+import com.familydocs.app.ui.components.rememberGoogleConnect
+import com.familydocs.app.ui.ds.FdConfirmSheet
+import com.familydocs.app.ui.ds.FdProgress
 import com.familydocs.app.data.VaultRepository
 import com.familydocs.app.domain.Countries
 import com.familydocs.app.domain.DocTypes
@@ -89,7 +93,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private sealed interface DriveAction { data object Backup : DriveAction; class Restore(val password: CharArray) : DriveAction }
+private enum class DriveAction { Enable, Backup, Restore, SignOut, Delete }
 
 /** Demo `settings`: profile card, Security, Countries, Backup, About, all as `.list` groups with `.lic` tiles and `.sw` switches. */
 @Composable
@@ -105,43 +109,56 @@ fun SettingsScreen(onBack: () -> Unit, onEditAccount: () -> Unit, onChangePassco
     val docs by app.repo.allDocuments.collectAsStateWithLifecycle(emptyList())
     val s by app.settings.state.collectAsStateWithLifecycle()
     var busy by remember { mutableStateOf<String?>(null) }
-    var askPassword by remember { mutableStateOf<String?>(null) } // "set" | "restore"
+    var sheet by remember { mutableStateOf<String?>(null) } // restore | signout | signout-failed | delete
+    var failure by remember { mutableStateOf("") }
     var pending by remember { mutableStateOf<DriveAction?>(null) }
     var showTree by remember { mutableStateOf(false) }
     val version = remember { runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: "" }
 
-    fun run(action: DriveAction, token: String) = scope.launch {
-        busy = if (action is DriveAction.Backup) "Encrypting ${docs.size} documents…" else "Downloading and decrypting…"
-        runCatching {
-            when (action) {
-                DriveAction.Backup -> {
-                    val r = app.backup.backup(token, s.viewableCopies) { msg -> busy = msg }
-                    app.settings.update { it.copy(lastBackup = System.currentTimeMillis()) }
-                    if (r.uploaded == 0 && r.removed == 0) "Backup complete · already up to date" else "Backup complete"
-                }
-                is DriveAction.Restore -> { app.backup.restore(token, action.password) { msg -> busy = msg }; "Vault restored" }
+    suspend fun backupNow(token: String): Result<String> {
+        busy = "Encrypting ${docs.size} documents…"
+        return runCatching {
+            val r = app.backup.backup(token, s.viewableCopies) { msg -> busy = msg }
+            app.settings.update { it.copy(lastBackup = System.currentTimeMillis()) }
+            if (r.uploaded == 0 && r.removed == 0) "Backup complete · already up to date" else "Backup complete"
+        }
+    }
+
+    fun run(action: DriveAction, g: GoogleAccountHelper.Session) {
+        when (action) {
+            DriveAction.Enable, DriveAction.Backup -> scope.launch {
+                if (action == DriveAction.Enable) { app.repo.linkGoogle(g.profile.email); app.setBackups(true) }
+                backupNow(g.token).onSuccess { toast.show(it) }.onFailure { toast.show("Backup didn't finish: ${it.message}") }
+                busy = null
             }
-        }.onSuccess { toast.show(it) }
-            .onFailure { toast.show(if (it is javax.crypto.AEADBadTagException) "Wrong backup password" else "Didn't finish: ${it.message}") }
-        busy = null
+            DriveAction.Restore -> scope.launch {
+                busy = "Downloading your backup…"
+                runCatching { app.backup.restore(g.token) { msg -> busy = msg } }
+                    .onSuccess { toast.show("Restored from Google Drive") }
+                    .onFailure { toast.show("Couldn't restore: ${it.message}. Nothing on this phone was changed.") }
+                busy = null
+            }
+            // These two end with the vault gone, so they run outside this screen's lifetime.
+            DriveAction.SignOut -> app.appScope.launch {
+                backupNow(g.token)
+                    .onSuccess { busy = "Signing out…"; app.wipeThisPhone(); toast.show("Signed out. Sign in with Google to get everything back.") }
+                    .onFailure { failure = it.message ?: "unknown error"; busy = null; sheet = "signout-failed" }
+            }
+            DriveAction.Delete -> app.appScope.launch {
+                busy = "Deleting your Drive backup…"
+                runCatching { app.backup.deleteFromDrive(g.token) }
+                    .onSuccess { app.wipeThisPhone(); toast.show("Account deleted") }
+                    .onFailure { busy = null; toast.show("Couldn't delete the Drive backup (${it.message}). Nothing was removed.") }
+            }
+        }
     }
 
-    val consent = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
-        val action = pending ?: return@rememberLauncherForActivityResult
-        pending = null
-        val token = runCatching { Identity.getAuthorizationClient(context).getAuthorizationResultFromIntent(result.data).accessToken }.getOrNull()
-        if (token != null) run(action, token) else toast.show("Google Drive access wasn't granted")
+    val connect = rememberGoogleConnect { r ->
+        val action = pending; pending = null
+        r.onSuccess { g -> if (action != null) run(action, g) }
+            .onFailure { if (it !is GoogleAccountHelper.Cancelled) toast.show(GoogleAccountHelper.explain(it)) }
     }
-
-    fun drive(action: DriveAction) = scope.launch {
-        val auth = runCatching { app.backup.authorize() }.getOrElse { toast.show("Couldn't reach Google: ${it.message}"); return@launch }
-        val intent = auth.pendingIntent
-        if (auth.hasResolution() && intent != null) {
-            pending = action
-            app.appLock.expectExternalActivity()
-            consent.launch(IntentSenderRequest.Builder(intent.intentSender).build())
-        } else auth.accessToken?.let { run(action, it) }
-    }
+    fun drive(action: DriveAction) { if (busy != null) return; pending = action; connect() }
 
     val countries = Countries.decode(account?.countries)
 
@@ -190,20 +207,22 @@ fun SettingsScreen(onBack: () -> Unit, onEditAccount: () -> Unit, onChangePassco
             FdSectionTitle("Backup")
             FdList {
                 FdListItem("Google Drive backup", "My Drive › Family Docs · encrypted · weekly on Wi-Fi", first = true, icon = "cloud", trailing = {
-                    FdSwitch(s.backupEnabled, { v ->
-                        if (v && !app.backup.keys.hasPassword) askPassword = "set"
-                        else { app.settings.update { it.copy(backupEnabled = v) }; BackupWorker.schedule(context, v) }
-                    }, "Google Drive backup")
+                    FdSwitch(s.backupEnabled, { v -> if (v) drive(DriveAction.Enable) else app.setBackups(false) }, "Google Drive backup")
                 })
-                BackupNowRow(s.backupEnabled, s.lastBackup, busy) {
-                    if (busy == null) { if (app.backup.keys.hasPassword) drive(DriveAction.Backup) else askPassword = "set" }
-                }
+                BackupNowRow(s.backupEnabled, s.lastBackup, busy) { drive(DriveAction.Backup) }
                 FdListItem("How it's organised in Drive", "One folder per person and per document", icon = "grid", onClick = { showTree = true })
                 FdListItem("Viewable copies in Drive",
                     if (s.viewableCopies) "Scans also saved unencrypted, so you can open them in Drive" else "Off: everything in Drive is encrypted", icon = "eye", trailing = {
                         FdSwitch(s.viewableCopies, { v -> app.settings.update { it.copy(viewableCopies = v) } }, "Viewable copies in Drive")
                     })
-                FdListItem("Restore from Drive", "Needs your backup password", icon = "refresh", onClick = { if (busy == null) askPassword = "restore" })
+                FdListItem("Restore from Drive", "Replaces this phone's vault with your Drive backup", icon = "refresh", onClick = { if (busy == null) sheet = "restore" })
+            }
+
+            FdSectionTitle("Account")
+            FdList {
+                FdListItem("Sign out", "Backs up to Drive, then removes everything from this phone", first = true, icon = "logout", onClick = { if (busy == null) sheet = "signout" })
+                FdListItem("Delete account", "Erases this phone and your Family Docs backup in Drive", leading = { FdLic("trash", c.danger) },
+                    onClick = { if (busy == null) sheet = "delete" })
             }
 
             FdSectionTitle("About")
@@ -218,37 +237,39 @@ fun SettingsScreen(onBack: () -> Unit, onEditAccount: () -> Unit, onChangePassco
     if (showTree) FdSheet({ showTree = false }) {
         SheetTitle("Your Google Drive",
             "Each document gets its own folder, colour-coded by type and labelled with the person, country and expiry, so Drive search finds it. " +
-                "Files marked with a lock are encrypted with your backup password. Only changed documents are uploaded again, and deleted ones go to Drive's bin.")
+                "Files marked with a lock are encrypted: only Family Docs, signed in to your Google account, can open them. Only changed documents are uploaded again, and deleted ones go to Drive's bin.")
         DriveTree(app.repo, s.viewableCopies)
     }
 
-    askPassword?.let { mode ->
-        var pw by remember { mutableStateOf("") }
-        var pw2 by remember { mutableStateOf("") }
-        val setting = mode == "set"
-        val ok = if (setting) pw.length >= 8 && pw == pw2 else pw.isNotEmpty()
-        FdSheet({ askPassword = null }) {
-            SheetTitle(if (setting) "Choose a backup password" else "Backup password",
-                if (setting) "Backups are encrypted with this password. You'll need it to restore on a new phone. It can't be recovered, so keep it somewhere safe."
-                else "Enter the password you chose when you set up backups. The vault on this phone will be replaced.")
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                FdField("Password", hint = if (setting) "At least 8 characters" else null) {
-                    FdInput(pw, { pw = it }, icon = "key", keyboardType = KeyboardType.Password, visualTransformation = PasswordVisualTransformation())
-                }
-                if (setting) FdField("Repeat password", error = if (pw2.isNotEmpty() && pw2 != pw) "Passwords don't match" else null) {
-                    FdInput(pw2, { pw2 = it }, icon = "key", keyboardType = KeyboardType.Password, visualTransformation = PasswordVisualTransformation(),
-                        error = pw2.isNotEmpty() && pw2 != pw)
-                }
-                FdButton(if (setting) "Save & back up" else "Restore", {
-                    askPassword = null
-                    if (setting) scope.launch {
-                        withContext(Dispatchers.Default) { app.backup.keys.setPassword(pw.toCharArray()) }
-                        app.settings.update { it.copy(backupEnabled = true) }; BackupWorker.schedule(context, true)
-                        drive(DriveAction.Backup)
-                    } else drive(DriveAction.Restore(pw.toCharArray()))
-                }, enabled = ok)
-                FdButton("Cancel", { askPassword = null }, kind = BtnKind.Ghost)
-            }
+    val email = account?.backupEmail?.takeIf { account?.googleLinked == true && it.isNotBlank() } ?: "your Google account"
+    when (sheet) {
+        "restore" -> FdConfirmSheet("Replace this phone's vault?", "Everything on this phone is replaced with the backup in $email's Google Drive.", "Restore",
+            onConfirm = { sheet = null; drive(DriveAction.Restore) }, onDismiss = { sheet = null }, danger = false)
+        "signout" -> FdSheet({ sheet = null }) {
+            SheetTitle("Sign out of Family Docs?",
+                "Everything is backed up to $email first. Then your family, documents, passwords and passcode are removed from this phone. " +
+                    "Sign in with the same Google account to get it all back, here or on a new phone.")
+            FdButton("Back up and sign out", { sheet = null; drive(DriveAction.SignOut) }, icon = "logout")
+            Spacer(Modifier.height(10.dp))
+            FdButton("Cancel", { sheet = null }, kind = BtnKind.Ghost)
+        }
+        "signout-failed" -> FdSheet({ sheet = null }) {
+            SheetTitle("The backup didn't finish",
+                "$failure. If you sign out anyway, anything added since the last backup" +
+                    (if (s.lastBackup > 0) " (${fmtDate(s.lastBackup)})" else "") + " is lost from this phone.")
+            FdButton("Sign out anyway", { sheet = null; app.appScope.launch { app.wipeThisPhone(); toast.show("Signed out") } }, kind = BtnKind.Danger)
+            Spacer(Modifier.height(10.dp))
+            FdButton("Stay signed in", { sheet = null }, kind = BtnKind.Ghost)
+        }
+        "delete" -> FdSheet({ sheet = null }) {
+            var typed by remember { mutableStateOf("") }
+            SheetTitle("Delete your account?",
+                "This permanently deletes the Family Docs folder and backup key from $email's Google Drive, and everything Family Docs keeps on this phone. It can't be undone.")
+            FdField("Type DELETE to confirm") { FdInput(typed, { typed = it.uppercase() }, placeholder = "DELETE") }
+            Spacer(Modifier.height(14.dp))
+            FdButton("Delete everything", { sheet = null; drive(DriveAction.Delete) }, kind = BtnKind.Danger, icon = "trash", enabled = typed.trim() == "DELETE")
+            Spacer(Modifier.height(10.dp))
+            FdButton("Cancel", { sheet = null }, kind = BtnKind.Ghost)
         }
     }
 }
@@ -268,20 +289,9 @@ private fun BackupNowRow(enabled: Boolean, last: Long, busy: String?, onClick: (
             Column(Modifier.weight(1f)) {
                 Text("Back up now", style = fdText(14f, FontWeight.SemiBold))
                 Text(sub, style = fdText(12f, color = c.muted), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (busy != null) Progress()
+                if (busy != null) FdProgress(Modifier.padding(top = 6.dp))
             }
         }
-    }
-}
-
-/** `.progress`: 6px green bar; the real upload has no fixed length, so it sweeps. */
-@Composable
-private fun Progress() {
-    val c = Fd.c
-    val t = rememberInfiniteTransition(label = "bk")
-    val x by t.animateFloat(0f, 1f, infiniteRepeatable(tween(1400, easing = LinearEasing), RepeatMode.Restart), label = "bkx")
-    Box(Modifier.padding(top = 6.dp).fillMaxWidth().height(6.dp).clip(RoundedCornerShape(6.dp)).background(c.surface2)) {
-        Box(Modifier.fillMaxHeight().fillMaxWidth(x.coerceAtLeast(.04f)).clip(RoundedCornerShape(6.dp)).background(c.ok))
     }
 }
 

@@ -35,6 +35,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.familydocs.app.security.BiometricHelper
 import com.familydocs.app.security.PasscodeManager
 import com.familydocs.app.ui.components.LocalContainer
+import com.familydocs.app.ui.components.rememberGoogleConnect
 import com.familydocs.app.ui.ds.BtnKind
 import com.familydocs.app.ui.ds.Fd
 import com.familydocs.app.ui.ds.FdAvatar
@@ -159,20 +160,21 @@ fun LockScreen(activity: FragmentActivity) {
         Box(Modifier.padding(top = 14.dp)) { FdTextButton("Forgot passcode?", { forgot = true; forgotError = null }) }
     }
 
+    val verifyGoogle = rememberGoogleConnect { r ->
+        val email = account?.backupEmail.orEmpty()
+        r.onSuccess { g ->
+            if (g.profile.email.equals(email, ignoreCase = true)) { forgot = false; resetting = true }
+            else forgotError = "That Google account (${g.profile.email}) isn't the one this vault backs up to."
+        }.onFailure { if (it !is com.familydocs.app.auth.GoogleAccountHelper.Cancelled) forgotError = com.familydocs.app.auth.GoogleAccountHelper.explain(it) }
+    }
+
     if (forgot) {
         val email = account?.backupEmail.orEmpty()
         FdSheet({ forgot = false }) {
             SheetTitle("Forgot your passcode?",
                 forgotError ?: if (email.isNotBlank() && account?.googleLinked == true) "Sign in with Google as ${mask(email)} to prove it's you. Your documents stay as they are."
                 else "Passcode recovery needs your Google account linked (Settings → Your account). Without it the vault can't be unlocked, by design.")
-            if (account?.googleLinked == true) FdButton("Verify with Google", {
-                scope.launch {
-                    app.appLock.expectExternalActivity()
-                    app.google.signIn(activity)
-                        .onSuccess { p -> if (p.email.equals(email, ignoreCase = true)) { forgot = false; resetting = true } else forgotError = "That Google account (${p.email}) isn't the backup email for this vault." }
-                        .onFailure { forgotError = "Sign-in didn't finish. Try again." }
-                }
-            })
+            if (account?.googleLinked == true) FdButton("Verify with Google", verifyGoogle)
             Spacer(Modifier.size(10.dp))
             FdButton("Cancel", { forgot = false }, kind = BtnKind.Ghost)
         }

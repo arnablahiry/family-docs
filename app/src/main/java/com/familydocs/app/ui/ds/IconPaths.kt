@@ -30,6 +30,7 @@ internal val ICON_PATHS: Map<String, List<Pair<String, Boolean>>> = mapOf(
     "eye" to listOf("M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" to false, "M9 12a3 3 0 1 0 6 0a3 3 0 1 0 -6 0z" to false),
     "eyeoff" to listOf("M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" to false, "M9 12a3 3 0 1 0 6 0a3 3 0 1 0 -6 0z" to false, "M4 4l16 16" to false),
     "edit" to listOf("M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z" to false, "M14 7.5l2.5 2.5" to false),
+    "logout" to listOf("M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M9.5 16.5L5 12l4.5-4.5M5 12h11" to false),
     "trash" to listOf("M4 7h16M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13M10 11v5.5M14 11v5.5" to false),
     "sliders" to listOf("M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1" to false, "M13 6a2 2 0 1 0 4 0a2 2 0 1 0 -4 0z" to false, "M7 12a2 2 0 1 0 4 0a2 2 0 1 0 -4 0z" to false, "M15 18a2 2 0 1 0 4 0a2 2 0 1 0 -4 0z" to false),
     "search" to listOf("M4.5 11a6.5 6.5 0 1 0 13 0a6.5 6.5 0 1 0 -13 0z" to false, "M20 20l-4.2-4.2" to false),

@@ -9,6 +9,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.familydocs.app.AppContainer
+import com.familydocs.app.auth.GoogleAccountHelper
 import com.familydocs.app.data.DEFAULT_SELF_AVATAR
 import com.familydocs.app.domain.Countries
 import com.familydocs.app.ocr.Images
@@ -18,7 +19,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** Create account and "Your account" (edit) share this. */
+/** Create account, "I already have an account" (restore from Drive) and "Your account" (edit) share this. */
 class OnboardingViewModel(private val c: AppContainer) : ViewModel() {
     var name by mutableStateOf("")
     var countryCode by mutableStateOf("+91")
@@ -40,9 +41,19 @@ class OnboardingViewModel(private val c: AppContainer) : ViewModel() {
     var removePhoto by mutableStateOf(false); private set
     var avatar by mutableStateOf(DEFAULT_SELF_AVATAR)
 
-    /** True once a Google client ID is in this build (see README → Google setup). Until then Google is optional. */
-    val googleReady: Boolean get() = !c.google.webClientId.startsWith("REPLACE_ME")
     var editing by mutableStateOf(false); private set
+
+    // ---- Google ----
+    /** Token + profile from the last "Continue with Google" in this flow. */
+    var session: GoogleAccountHelper.Session? = null; private set
+    /** Create account found that this Google account already has a backup. */
+    var foundBackup by mutableStateOf(false); private set
+
+    // ---- restore ("I already have an account") ----
+    var restoreStatus by mutableStateOf<String?>(null); private set
+    var restoreError by mutableStateOf<String?>(null); private set
+    /** The vault came from Drive, so finishing only sets this phone's passcode. */
+    var restored by mutableStateOf(false); private set
 
     init {
         viewModelScope.launch {
@@ -68,22 +79,50 @@ class OnboardingViewModel(private val c: AppContainer) : ViewModel() {
 
     val hasPhoto: Boolean get() = picked != null || (savedPhoto != null && !removePhoto)
 
-    fun continueWithGoogle(activity: Context) = viewModelScope.launch {
-        if (!googleReady) { message = "Google sign-in isn't set up in this build yet. Type your email for now; you can link Google later."; return@launch }
-        busy = true
-        c.google.signIn(activity)
-            .onSuccess { p ->
-                email = p.email
-                if (name.isBlank()) name = p.name.orEmpty()
-                googleLinked = true
-                message = null
-                // Google's photo is only a starting point: it goes into the crop circle and can be replaced.
-                if (!hasPhoto) p.photoUrl?.let { c.google.downloadPhoto(it) }?.let { bytes ->
-                    withContext(Dispatchers.Default) { Images.decode(bytes, 900) }?.let { picked = it; removePhoto = false }
-                }
+    /** Call right before launching the Google screen. */
+    fun googleStarted() { busy = true; message = null; restoreError = null }
+
+    /** Result of "Continue with Google" on Create account / Your account. */
+    fun onGoogle(r: Result<GoogleAccountHelper.Session>) = viewModelScope.launch {
+        r.onSuccess { s ->
+            session = s
+            email = s.profile.email
+            if (name.isBlank()) name = s.profile.name.orEmpty()
+            googleLinked = true
+            // Google's photo is only a starting point: it goes into the crop circle and can be replaced.
+            if (!hasPhoto) s.profile.photoUrl?.let { c.google.downloadPhoto(it) }?.let { bytes ->
+                withContext(Dispatchers.Default) { Images.decode(bytes, 900) }?.let { picked = it; removePhoto = false }
             }
-            .onFailure { message = "Google sign-in didn't finish. Try again." }
+            if (!editing) foundBackup = runCatching { c.backup.hasBackup(s.token) }.getOrDefault(false)
+        }.onFailure { if (it !is GoogleAccountHelper.Cancelled) message = GoogleAccountHelper.explain(it) }
         busy = false
+    }
+
+    /** "I already have an account": find the Drive backup of this Google account and bring it to this phone. */
+    fun signIn(r: Result<GoogleAccountHelper.Session>, onRestored: () -> Unit) = viewModelScope.launch {
+        val s = r.getOrElse {
+            busy = false
+            if (it !is GoogleAccountHelper.Cancelled) restoreError = GoogleAccountHelper.explain(it)
+            return@launch
+        }
+        session = s; busy = true; restoreError = null
+        restoreStatus = "Looking for your backup in ${s.profile.email}…"
+        val exists = runCatching { c.backup.hasBackup(s.token) }
+        when {
+            exists.isFailure -> restoreError = GoogleAccountHelper.explain(exists.exceptionOrNull()!!)
+            exists.getOrNull() != true -> restoreError = "There's no Family Docs backup in ${s.profile.email}. Sign in with another Google account, or create a new account."
+            else -> runCatching { c.backup.restore(s.token) { msg -> restoreStatus = msg } }
+                .onSuccess {
+                    restored = true
+                    c.settings.update { it.copy(lastBackup = System.currentTimeMillis()) }
+                    c.setBackups(true)
+                    restoreStatus = null; busy = false
+                    onRestored()
+                    return@launch
+                }
+                .onFailure { restoreError = "Couldn't restore: ${it.message ?: "unknown error"}. Nothing on this phone was changed." }
+        }
+        restoreStatus = null; busy = false
     }
 
     fun toggleCountry(code: String) { countries = if (code in countries) countries - code else countries + code }
@@ -95,8 +134,7 @@ class OnboardingViewModel(private val c: AppContainer) : ViewModel() {
         if (name.trim().length < 2) e["name"] = "Enter your name"
         val digits = phone.filter(Char::isDigit)
         if (digits.length !in 7..12) e["phone"] = "Enter a phone number with 7–12 digits"
-        if (googleReady && (!googleLinked || email.isBlank())) e["email"] = "Connect your Google account to continue"
-        if (!googleReady && email.isNotBlank() && !Regex("^[^\\s@]+@[^\\s@]+\\.[^\\s@]{2,}$").matches(email.trim())) e["email"] = "Enter an email like name@gmail.com"
+        if (!googleLinked || email.isBlank()) e["email"] = "Connect your Google account to continue"
         if (countries.isEmpty()) e["countries"] = "Pick at least one country"
         errors = e
         return e.isEmpty()
@@ -105,11 +143,17 @@ class OnboardingViewModel(private val c: AppContainer) : ViewModel() {
     /** [cropBoxPx] = size of the crop circle on screen, so the saved photo is exactly what was shown. */
     fun finish(biometric: Boolean?, cropBoxPx: Float, onDone: () -> Unit) = viewModelScope.launch {
         busy = true
+        if (restored) {
+            pendingPasscode?.let { code -> withContext(Dispatchers.Default) { c.passcode.set(code) } }
+            if (biometric != null) c.settings.update { it.copy(biometric = biometric) }
+            c.appLock.unlock(); busy = false; onDone(); return@launch
+        }
         val bytes = picked?.let { bmp -> withContext(Dispatchers.Default) { Images.jpeg(cropToSquare(bmp, crop, cropBoxPx)) } }
         c.repo.saveAccount(name.trim(), countryCode, phone.trim(), email.trim(), bytes, googleLinked, countries,
             removePhoto = removePhoto && bytes == null, avatar = avatar)
         pendingPasscode?.let { code -> withContext(Dispatchers.Default) { c.passcode.set(code) } }
         if (biometric != null) c.settings.update { it.copy(biometric = biometric) }
+        if (!editing && googleLinked) c.setBackups(true, now = true) // first backup straight away
         c.appLock.unlock()
         busy = false
         onDone()

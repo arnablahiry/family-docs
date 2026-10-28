@@ -110,6 +110,14 @@ class VaultRepository(private val dao: VaultDao, val files: FileStore) {
         Snapshot(dao.accountNow(), dao.membersNow(), dao.allDocumentsNow(), dao.allPasswordsNow())
     }
 
+    /** Marks the account as linked to this Google account (its Drive holds the backups). */
+    suspend fun linkGoogle(email: String) = withContext(Dispatchers.IO) {
+        dao.accountNow()?.let { dao.upsertAccount(it.copy(backupEmail = email, googleLinked = true)) }
+    }
+
+    /** Removes every account, person, document and password from this phone. */
+    suspend fun wipe() = withContext(Dispatchers.IO) { dao.replaceAll(null, emptyList(), emptyList(), emptyList()); files.clear() }
+
     suspend fun restore(s: Snapshot) = withContext(Dispatchers.IO) { dao.replaceAll(s.account, s.members, s.documents, s.passwords) }
 
     data class Snapshot(val account: AccountEntity?, val members: List<MemberEntity>, val documents: List<DocumentEntity>, val passwords: List<PasswordEntity>)

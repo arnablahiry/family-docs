@@ -42,7 +42,7 @@ import com.familydocs.app.ui.security.PasscodeSetupScreen
 import com.familydocs.app.ui.settings.SettingsScreen
 import com.familydocs.app.ui.ds.cropBoxPx
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -60,7 +60,7 @@ fun AnimatedContentTransitionScope<NavBackStackEntry>.fdExit(): ExitTransition =
 @Composable
 fun AppRoot(activity: FragmentActivity) {
     val c = LocalContainer.current
-    val registeredFlow = remember { c.repo.account.map { it != null && c.passcode.isSet } }
+    val registeredFlow = remember { combine(c.repo.account, c.passcode.isSetFlow) { a, pc -> a != null && pc } }
     val registered by registeredFlow.collectAsStateWithLifecycle(initialValue = null)
     val locked by c.appLock.locked.collectAsStateWithLifecycle()
     val toast = LocalToast.current

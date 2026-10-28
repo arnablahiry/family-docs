@@ -28,11 +28,11 @@ class DriveClient(private val token: String) {
         return Item(o.getString("id"), o.optString("name"), o.optString("mimeType"), p?.keys()?.asSequence()?.associateWith { p.getString(it) } ?: emptyMap())
     }
 
-    fun list(q: String): List<Item> {
+    fun list(q: String, space: String = "drive"): List<Item> {
         val out = mutableListOf<Item>()
         var page: String? = null
         do {
-            val url = "$FILES?pageSize=1000&fields=nextPageToken,files(id,name,mimeType,appProperties)&q=" +
+            val url = "$FILES?spaces=$space&pageSize=1000&fields=nextPageToken,files(id,name,mimeType,appProperties)&q=" +
                 URLEncoder.encode("$q and trashed = false", "UTF-8") + (page?.let { "&pageToken=$it" } ?: "")
             val j = JSONObject(call(Request.Builder().url(url)))
             val arr = j.getJSONArray("files")
@@ -94,6 +94,32 @@ class DriveClient(private val token: String) {
             r.body!!.bytes()
         }
 
+    /** Permanently deletes a file, or a folder with everything in it. */
+    fun delete(id: String) {
+        http.newCall(Request.Builder().url("$FILES/$id").delete().header("Authorization", "Bearer $token").build()).execute().use { r ->
+            check(r.isSuccessful || r.code == 404) { "Drive delete ${r.code}" }
+        }
+    }
+
+    // ---- hidden app folder (scope drive.appdata): only this app can see it, it never shows in My Drive ----
+    fun appDataFind(name: String): Item? = list("name = '${name.replace("'", "\\'")}'", "appDataFolder").firstOrNull()
+
+    fun appDataRead(name: String): ByteArray? = appDataFind(name)?.let { download(it.id) }
+
+    fun appDataWrite(name: String, bytes: ByteArray) {
+        val existing = appDataFind(name)
+        if (existing != null) {
+            call(Request.Builder().url("$UPLOAD/${existing.id}?uploadType=media").patch(bytes.toRequestBody(OCTET_TYPE)))
+            return
+        }
+        val body = MultipartBody.Builder().setType("multipart/related".toMediaType())
+            .addPart(JSONObject().put("name", name).put("parents", JSONArray().put("appDataFolder")).toString().toRequestBody(JSON))
+            .addPart(bytes.toRequestBody(OCTET_TYPE)).build()
+        call(Request.Builder().url("$UPLOAD?uploadType=multipart&fields=id").post(body))
+    }
+
+    fun appDataDelete(name: String) { appDataFind(name)?.let { delete(it.id) } }
+
     fun trash(id: String) { call(Request.Builder().url("$FILES/$id").patch(JSONObject().put("trashed", true).toString().toRequestBody(JSON))) }
 
     companion object {
@@ -101,5 +127,6 @@ class DriveClient(private val token: String) {
         private const val FILES = "https://www.googleapis.com/drive/v3/files"
         private const val UPLOAD = "https://www.googleapis.com/upload/drive/v3/files"
         private val JSON = "application/json; charset=UTF-8".toMediaType()
+        private val OCTET_TYPE = "application/octet-stream".toMediaType()
     }
 }

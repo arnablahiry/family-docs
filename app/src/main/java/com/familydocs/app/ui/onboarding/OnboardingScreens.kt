@@ -48,6 +48,10 @@ import com.familydocs.app.R
 import com.familydocs.app.security.BiometricHelper
 import com.familydocs.app.ui.components.LocalContainer
 import com.familydocs.app.ui.components.appViewModel
+import com.familydocs.app.ui.components.rememberGoogleConnect
+import com.familydocs.app.ui.ds.FdBanner
+import com.familydocs.app.ui.ds.FdProgress
+import com.familydocs.app.ui.ds.FdTextButton
 import com.familydocs.app.ui.ds.BtnKind
 import com.familydocs.app.ui.ds.Fd
 import com.familydocs.app.ui.ds.FdAvatar
@@ -74,15 +78,24 @@ import com.familydocs.app.ui.security.PasscodeSetupScreen
 @Composable
 fun OnboardingFlow(onDone: () -> Unit) {
     val nav = rememberNavController()
-    val vm = appViewModel { OnboardingViewModel(it) }
+    // A fresh view model every time onboarding appears (e.g. after signing out), never the last person's draft.
+    val session = remember { System.nanoTime() }
+    val vm = appViewModel(key = "onboarding-$session") { OnboardingViewModel(it) }
     val context = LocalContext.current
     val box = cropBoxPx()
     NavHost(nav, startDestination = "welcome", enterTransition = { fdEnter() }, exitTransition = { fdExit() },
         popEnterTransition = { fdPopEnter() }, popExitTransition = { fdExit() }) {
-        composable("welcome") { WelcomeScreen { nav.navigate("register") } }
-        composable("register") { RegisterScreen(vm, onBack = { nav.popBackStack() }) { nav.navigate("passcode") } }
+        composable("welcome") { WelcomeScreen(onStart = { nav.navigate("register") }, onSignIn = { nav.navigate("signin") }) }
+        composable("register") {
+            RegisterScreen(vm, onBack = { nav.popBackStack() }, onRestoreInstead = { nav.navigate("signin") }) { nav.navigate("passcode") }
+        }
+        composable("signin") {
+            SignInScreen(vm, onBack = { nav.popBackStack() }, onCreate = { nav.navigate("register") { popUpTo("welcome") } }) {
+                nav.navigate("passcode") { popUpTo("welcome") }
+            }
+        }
         composable("passcode") {
-            PasscodeSetupScreen(title = "Step 2 of 2", onBack = { nav.popBackStack() }) { code ->
+            PasscodeSetupScreen(title = if (vm.restored) "Last step" else "Step 2 of 2", onBack = { nav.popBackStack() }) { code ->
                 vm.pendingPasscode = code
                 if (BiometricHelper.available(context)) nav.navigate("biometric") else vm.finish(false, box, onDone)
             }
@@ -93,7 +106,7 @@ fun OnboardingFlow(onDone: () -> Unit) {
 
 /** `.welcome`: the demo's artwork (rendered from it, light + dark), heading, Create account, footnote. */
 @Composable
-fun WelcomeScreen(onStart: () -> Unit) {
+fun WelcomeScreen(onStart: () -> Unit, onSignIn: () -> Unit) {
     val c = Fd.c
     Column(Modifier.fillMaxSize().background(c.bg).statusBarsPadding().navigationBarsPadding().padding(start = 24.dp, end = 24.dp, top = 20.dp, bottom = 26.dp)) {
         Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -102,6 +115,8 @@ fun WelcomeScreen(onStart: () -> Unit) {
         Text("I got tired of losing access to things, so here we are", style = fdText(30f, lineHeight = 33.6f, spacing = -.01f),
             modifier = Modifier.padding(bottom = 24.dp))
         FdButton("Create account", onStart)
+        Spacer(Modifier.height(10.dp))
+        FdButton("I already have an account", onSignIn, kind = BtnKind.Ghost)
         Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
             FdIcon("lock", 13.dp, tint = c.muted)
             Text("  Encrypted on this phone · backups go to your Google Drive", style = fdText(11.5f, color = c.muted), textAlign = TextAlign.Center)
@@ -111,12 +126,14 @@ fun WelcomeScreen(onStart: () -> Unit) {
 
 /** `.register`: name, phone, profile picture, Google account (or email until Google is set up), countries. Also "Your account". */
 @Composable
-fun RegisterScreen(vm: OnboardingViewModel, onBack: () -> Unit, title: String = "Create account", showStep: Boolean = true, onNext: () -> Unit) {
+fun RegisterScreen(vm: OnboardingViewModel, onBack: () -> Unit, title: String = "Create account", showStep: Boolean = true,
+                   onRestoreInstead: () -> Unit = {}, onNext: () -> Unit) {
     val c = Fd.c
     val context = LocalContext.current
     val container = LocalContainer.current
     val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> uri?.let { vm.pickPhoto(context, it) } }
     val e = vm.errors
+    val connectGoogle = rememberGoogleConnect { vm.onGoogle(it) }
     Column(Modifier.fillMaxSize().background(c.bg).statusBarsPadding().imePadding()) {
         FdTopBar(title, onBack)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -169,27 +186,23 @@ fun RegisterScreen(vm: OnboardingViewModel, onBack: () -> Unit, title: String = 
                     })
             }
 
-            // ---- Google account (backup + passcode recovery) ----
-            FdField(if (vm.googleReady) "Google account" else "Backup email", error = e["email"],
-                hint = vm.message ?: when {
-                    vm.googleReady ->"Used for Drive backups and to recover your passcode."
-                    else -> "Google sign-in isn't set up in this build yet (README → Google setup). Type your email; you can link Google later."
-                }) {
-                when {
-                    vm.googleLinked -> Row(
-                        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.accentSoft).padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        FdAvatar(vm.name, 52.dp, photoFile = vm.savedPhoto, character = vm.avatar, bitmap = vm.picked)
-                        Column(Modifier.weight(1f)) {
-                            Text(vm.name.ifBlank { "Google account" }, style = fdText(14f, FontWeight.Bold))
-                            Text(vm.email, style = fdText(12f, color = c.muted))
-                            Text("Backups go to this Google Drive", style = fdText(12f, color = c.muted))
-                        }
-                        FdIconButton("close", vm::unlinkGoogle, iconSize = 18.dp, description = "Unlink Google")
+            // ---- Google account: Drive backups and signing in on a new phone ----
+            FdField("Google account", error = e["email"], hint = vm.message ?: "Backups go to this Google Drive. Signing in with it on a new phone brings everything back.") {
+                if (vm.googleLinked) Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.accentSoft).padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    FdAvatar(vm.name, 52.dp, photoFile = if (vm.hasPhoto) vm.savedPhoto else null, character = vm.avatar, bitmap = vm.picked)
+                    Column(Modifier.weight(1f)) {
+                        Text(vm.name.ifBlank { "Google account" }, style = fdText(14f, FontWeight.Bold))
+                        Text(vm.email, style = fdText(12f, color = c.muted))
+                        Text("Backups go to this Google Drive", style = fdText(12f, color = c.muted))
                     }
-                    vm.googleReady -> GoogleButton(busy = vm.busy) { vm.continueWithGoogle(context) }
-                    else -> FdInput(vm.email, { vm.email = it }, placeholder = "name@gmail.com", icon = "mail", keyboardType = KeyboardType.Email, error = "email" in e)
+                    FdIconButton("close", vm::unlinkGoogle, iconSize = 18.dp, description = "Unlink Google")
+                }
+                else GoogleButton(busy = vm.busy) { vm.googleStarted(); connectGoogle() }
+                if (vm.foundBackup) FdBanner("cloud", "This Google account already has a Family Docs backup.", Modifier.padding(top = 4.dp)) {
+                    FdTextButton("Restore it", onRestoreInstead)
                 }
             }
 
@@ -235,6 +248,47 @@ fun BiometricOptIn(onBack: () -> Unit, onChoice: (Boolean) -> Unit) {
                 FdButton("Use fingerprint", { onChoice(true) })
                 FdButton("Not now", { onChoice(false) }, kind = BtnKind.Ghost)
             }
+        }
+    }
+}
+
+
+/**
+ * "I already have an account": Continue with Google → the app finds that account's Drive backup and brings
+ * the whole vault back (no backup password). Then a passcode for this phone and you're in.
+ */
+@Composable
+fun SignInScreen(vm: OnboardingViewModel, onBack: () -> Unit, onCreate: () -> Unit, onRestored: () -> Unit) {
+    val c = Fd.c
+    val connect = rememberGoogleConnect { vm.signIn(it, onRestored) }
+    val known = vm.session
+    Column(Modifier.fillMaxSize().background(c.bg).statusBarsPadding().navigationBarsPadding()) {
+        FdTopBar("Sign in", onBack)
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 24.dp).padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Box(Modifier.size(88.dp).clip(CircleShape).background(c.accentSoft), contentAlignment = Alignment.Center) { FdIcon("cloud", 44.dp, 1.6f, c.accent) }
+            Text("Welcome back", style = fdText(26f, FontWeight.Bold))
+            Text("Sign in with the Google account your backups go to. Your family, documents and passwords come back to this phone. No backup password needed.",
+                style = fdText(13.5f, color = c.muted, lineHeight = 19f))
+            Spacer(Modifier.height(4.dp))
+            val status = vm.restoreStatus
+            if (status != null) {
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.surface).border(1.dp, c.line, RoundedCornerShape(16.dp)).padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(status, style = fdText(13f))
+                    FdProgress()
+                }
+            } else {
+                if (known != null && vm.foundBackup && vm.restoreError == null) {
+                    FdButton("Restore from ${known.profile.email}", { vm.googleStarted(); vm.signIn(Result.success(known), onRestored) }, icon = "cloud")
+                    Text("or use a different account", style = fdText(12f, color = c.muted), modifier = Modifier.align(Alignment.CenterHorizontally))
+                }
+                GoogleButton(busy = vm.busy) { vm.googleStarted(); connect() }
+            }
+            vm.restoreError?.let { FdBanner("info", it) }
+        }
+        Row(Modifier.fillMaxWidth().padding(bottom = 18.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+            Text("New here?", style = fdText(13f, color = c.muted))
+            FdTextButton("Create account", onCreate)
         }
     }
 }

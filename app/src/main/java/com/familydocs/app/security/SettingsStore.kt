@@ -47,6 +47,9 @@ class SettingsStore(context: Context) {
         _state.value = s
     }
 
+    /** Back to defaults (sign out / delete account). */
+    fun reset() { prefs.edit().clear().apply(); _state.value = Settings() }
+
     companion object {
         val AUTO_LOCK_OPTIONS = listOf(0L to "Immediately", 60_000L to "1 min", 300_000L to "5 min", 900_000L to "15 min")
         fun autoLockLabel(ms: Long) = AUTO_LOCK_OPTIONS.firstOrNull { it.first == ms }?.second ?: "${ms / 60_000} min"

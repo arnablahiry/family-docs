@@ -19,6 +19,12 @@ class PasscodeManager(context: Context) {
     }
 
     val isSet: Boolean get() = prefs.contains(HASH)
+    private val _isSetFlow = kotlinx.coroutines.flow.MutableStateFlow(isSet)
+    /** Emits whenever a passcode is set or cleared (the app switches between onboarding and the vault on it). */
+    val isSetFlow: kotlinx.coroutines.flow.StateFlow<Boolean> = _isSetFlow
+
+    /** Removes the passcode from this phone (sign out / delete account). */
+    fun clear() { prefs.edit().clear().commit(); _isSetFlow.value = false }
     val length: Int get() = prefs.getInt(LEN, 6)
 
     fun set(code: String) {
@@ -29,7 +35,8 @@ class PasscodeManager(context: Context) {
             .putString(HASH, Base64.encodeToString(hash(code, salt), Base64.NO_WRAP))
             .putInt(LEN, code.length)
             .putInt(FAILS, 0).putLong(UNTIL, 0)
-            .apply()
+            .commit()
+        _isSetFlow.value = true
     }
 
     fun lockoutLeft(): Long {

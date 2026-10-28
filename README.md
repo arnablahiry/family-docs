@@ -30,23 +30,28 @@ Install updates by opening the new APK on the phone. Android shows "Update" rath
 
 - **Google Play Protect / developer verification:** Google now requires sideloaded apps to be registered by a verified developer. It's enforced in Brazil, Indonesia, Singapore and Thailand from 30 Sep 2026, and worldwide from 2027. For a family app, create a free **limited distribution** account in the Android Developer Console (email only, no ID, up to 20 devices). Register the package `com.familydocs.app` with the release key's SHA-256 (below). Registered apps install without warnings. Until then, Android may show a one-time "unknown app" or Play Protect prompt; tap *More details → Install anyway*.
 - **What the app already does to look trustworthy:** it's release-signed (never debug), targets the latest Android (SDK 35), and asks for only Internet, biometrics and the camera app. There's no SMS, contacts, location, accessibility or background-start permission, nothing is downloaded or run at runtime, and there's no obfuscated networking.
-- **Google sign-in screen:** the app only asks for the `drive.file` permission, which only covers files the app creates. That's a non-sensitive scope, so after you publish the OAuth consent screen (add an app name, your email and an icon), Google doesn't show the "Google hasn't verified this app" warning.
+- **Google sign-in screen:** the app only asks for `drive.file` (files the app creates), `drive.appdata` (its hidden app folder) and your name/email/photo. That's a non-sensitive scope, so after you publish the OAuth consent screen (add an app name, your email and an icon), Google doesn't show the "Google hasn't verified this app" warning.
 
 Release key fingerprints (for Google Cloud's Android OAuth client and for app registration):
 
 - SHA-1: `20:73:FB:49:3D:04:18:C3:83:16:7A:1F:86:E5:60:A6:AF:B8:AC:03`
 - SHA-256: `C0:12:03:6F:4F:A0:DE:80:A1:71:56:66:BF:0C:AD:A1:B8:6E:A6:84:1D:0C:DA:2C:56:6B:EC:7C:91:82:EC:6E`
 
-## Google setup (sign-in photo, passcode recovery, Drive backup)
+## Google setup (Continue with Google, Drive backup, signing in on a new phone)
+
+Everything Google-related goes through one consent screen (Google Identity `AuthorizationClient`), so only an **Android** OAuth client is needed. There's no web client ID and no server.
 
 In [Google Cloud Console](https://console.cloud.google.com/):
 
-1. Create a project, open **APIs & Services → OAuth consent screen**, choose *External* and add yourself as a test user.
-2. **Enable the Google Drive API** (APIs & Services → Library). The app uses the non-sensitive `drive.file` scope.
-3. **Credentials → Create credentials → OAuth client ID**:
-   - *Android*: package `com.familydocs.app` plus the **release** SHA-1 above (add a second Android client with your debug SHA-1 if you also run from Android Studio). Get the SHA-1 from Android Studio's Gradle panel → `signingReport`, or run `keytool -list -v -keystore ~/.android/debug.keystore -storepass android`.
-   - *Web application*: no extra settings. Copy its client ID.
-4. Paste the **Web** client ID into `app/src/main/res/values/strings.xml` → `google_web_client_id`.
+1. Create a project (e.g. *Family Docs*).
+2. **APIs & Services → Library → Google Drive API → Enable.**
+3. **Google Auth Platform → Branding**: app name *Family Docs*, your email as support and developer contact. **Audience**: *External*. While it's in *Testing*, add every family member's Google account under **Test users** (up to 100).
+4. **Data access → Add scopes**: `.../auth/drive.file`, `.../auth/drive.appdata`, `userinfo.email`, `userinfo.profile`, `openid`. All are non-sensitive.
+5. **Clients → Create client → Android**: package `com.familydocs.app`, SHA-1 `20:73:FB:49:3D:04:18:C3:83:16:7A:1F:86:E5:60:A6:AF:B8:AC:03` (the release key). Add a second Android client with your debug SHA-1 if you run from Android Studio.
+
+That's all. The app doesn't need rebuilding afterwards. Google matches the installed app by package name and signature.
+
+**Signing in on a new phone:** *I already have an account → Continue with Google*. The backup key lives in that Google account's hidden Drive app folder (`drive.appdata`, invisible in My Drive and readable only by Family Docs), so no backup password is needed. Trade-off: anyone who can sign in to that Google account *and* install this app could restore the vault, so keep 2-step verification on for the Google account.
 
 ## Font (Abaddon)
 
@@ -61,14 +66,14 @@ All text uses Abaddon v1.2 (light + bold), bundled in `app/src/main/res/font/`, 
 | Auto-lock | `security/AppLock.kt` | Locks after the chosen time in background; pickers and camera don't trigger it |
 | Encryption | `security/CryptoManager.kt`, `data/AppDatabase.kt` | AES-256-GCM key in Android Keystore encrypts every file and photo; the database is SQLCipher with a Keystore-wrapped random key |
 | Screenshots | `MainActivity.kt` | `FLAG_SECURE` on by default (Settings toggle) |
-| Account | `ui/onboarding` | Name, phone number, **Google account (required)** for the backup email, Drive backup and profile photo, plus the **countries you keep documents for** |
+| Account | `ui/onboarding` | Name, phone number, profile picture, **Google account (required)** for the Drive backup, plus the **countries you keep documents for**. *I already have an account* restores everything from Drive. Settings has **Sign out** (backs up, then clears the phone) and **Delete account** (also deletes the Drive backup) |
 | Forgot passcode | `ui/security/SecurityScreens.kt` | Sign in with Google as the backup email → set a new passcode. Documents are untouched |
 | OCR | `ocr/TextReader.kt` (ML Kit, offline) → `ocr/DocumentParser.kt` | Aadhaar (Verhoeff check), PAN, passport / visa / residence-permit MRZ (ICAO check digits), voter ID, Indian DL, "Label: value" lines, IBAN. Every field stays editable |
 | Icons from names | `domain/DocType.kt` | "Passport" → passport icon, "OCI card" → residence, unknown names → file icon + initials |
 | Vault views | `ui/member/MemberScreen.kt`, `ui/components/DocVisuals.kt` | Cards (stacked wallet: first tap lifts a card and the cards below spring away, second tap opens), List, Icons |
 | Common vault | `data/VaultRepository.kt`, `ui/member` | A shared vault (house icon) created with the account, for rent agreements, bills, home insurance and the Wi-Fi password. It can be renamed but not deleted. See the note below on sharing between phones |
 | Countries | `domain/Country.kt`, `ui/components/Flag.kt`, `ui/components/CountryPicker.kt` | Every ISO country, with the phone's emoji flags. Picked at sign-up (searchable list) and per document under *Issued by* (searchable, your countries first; OCR pre-selects it). Cards show the flag; a vault with documents from more than one country gets show/hide pills |
-| Backup | `backup/DriveBackup.kt`, `backup/DriveClient.kt` | `My Drive › Family Docs › <person> › <document · country>/`, with each document folder colour-coded by type and labelled with Drive appProperties (person, type, country, expiry). Files are AES-256-GCM encrypted with a key from your backup password (PBKDF2, 210k rounds). Only changed documents are re-uploaded, and deleted ones go to Drive's bin. Viewable unencrypted copies are optional and off by default. Runs weekly on Wi-Fi, or via Back up now. Restore on a new phone with the same password |
+| Backup | `backup/DriveBackup.kt`, `backup/DriveClient.kt` | `My Drive › Family Docs › <person> › <document · country>/`, with each document folder colour-coded by type and labelled with Drive appProperties (person, type, country, expiry). Files are AES-256-GCM encrypted with a random key kept on the phone (Keystore) and in the Google account's hidden app folder. Only changed documents are re-uploaded, and deleted ones go to Drive's bin. Viewable unencrypted copies are optional and off by default. Runs weekly on Wi-Fi, or via Back up now. On a new phone: *I already have an account → Continue with Google* |
 
 Android's own cloud backup is switched off (`allowBackup=false` plus data-extraction rules). The Keystore key can't leave the phone, so a copy made that way couldn't be decrypted. Use the in-app Drive backup instead.
 
