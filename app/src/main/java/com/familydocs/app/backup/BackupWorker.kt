@@ -37,6 +37,8 @@ class BackupWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
         }
         // Shared groups: publish your share and read everyone else's (a failure here never fails the backup).
         if (sharing || asking) runCatching { c.share.sync(token) }
+        // Groups you joined with an invite: your share goes back to everyone in them automatically.
+        if (c.requests.enabled && sharing) runCatching { c.requests.sendBack(token) }
         if (!backup) return Result.success()
         return runCatching { c.backup.backup(token, c.settings.value.viewableCopies) }
             .onSuccess { c.settings.update { s -> s.copy(lastBackup = System.currentTimeMillis()) } }

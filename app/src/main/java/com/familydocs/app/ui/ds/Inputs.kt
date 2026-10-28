@@ -71,6 +71,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.familydocs.app.domain.Countries
+import androidx.compose.ui.graphics.drawscope.clipPath
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -209,7 +210,7 @@ fun FdPhotoCropper(bitmap: Bitmap?, state: CropState, placeholder: @Composable (
                     dstSize = androidx.compose.ui.unit.IntSize(w.roundToInt(), h.roundToInt()), filterQuality = androidx.compose.ui.graphics.FilterQuality.Medium)
                 // dim everything outside the circle, then the circle's rim
                 val hole = androidx.compose.ui.graphics.Path().apply { addOval(androidx.compose.ui.geometry.Rect(center, circlePx / 2)) }
-                androidx.compose.ui.graphics.drawscope.clipPath(hole, androidx.compose.ui.graphics.ClipOp.Difference) { drawRect(Color(0x8C0A0F1E)) }
+                clipPath(hole, androidx.compose.ui.graphics.ClipOp.Difference) { drawRect(Color(0x8C0A0F1E)) }
                 drawCircle(Color.White.copy(alpha = .92f), circlePx / 2, center, style = androidx.compose.ui.graphics.drawscope.Stroke(ring))
             }
         }

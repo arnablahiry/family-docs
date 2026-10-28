@@ -106,6 +106,28 @@ class JoinRequests(private val context: Context, private val dao: VaultDao, priv
         out
     }
 
+    /**
+     * After you join a group with an invite: your own invite (sealed with the group key, so only members can open it) goes
+     * into the group's mailbox, and every member's phone adds you; no one has to paste anything back. Once per share.
+     */
+    suspend fun sendBack(accessToken: String) = withContext(Dispatchers.IO) {
+        dao.groupsNow().filter { it.peerList.isNotEmpty() }.forEach { g ->
+            val tag = "back-sent:${g.id}:${g.shareIndex}"
+            if (g.shareIndex != null && prefs.getBoolean(tag, false)) return@forEach
+            runCatching {
+                val inv = share.invite(accessToken, g.id)
+                val c = GroupCodes.normalize(g.code)
+                val id = java.util.UUID.randomUUID().toString().replace("-", "").take(20)
+                val me = dao.accountNow()?.name ?: inv.fromName
+                val fields = JSONObject().put("pub", sv("-")).put("who", sv(RequestCrypto.sealText(me, RequestCrypto.codeKey(c))))
+                    .put("at", JSONObject().put("integerValue", System.currentTimeMillis().toString())).put("uid", sv(auth().second))
+                call(Request.Builder().url("$base/groups/${RequestCrypto.lookup(c)}/requests?documentId=$id").post(JSONObject().put("fields", fields).toString().toRequestBody(json)))
+                patch("groups/${RequestCrypto.lookup(c)}/requests/$id", JSONObject().put("ok", sv("1")).put("back", sv(RequestCrypto.sealText(inv.encode(), share.groupKey(g)))))
+                prefs.edit().putBoolean("back-sent:${g.id}:${dao.groupNow(g.id)?.shareIndex}", true).apply()
+            }
+        }
+    }
+
     // ---------------- members ----------------
 
     /** Makes the group findable by its code (name sealed with the code). Once per group and code. */
