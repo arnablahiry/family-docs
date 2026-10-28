@@ -290,13 +290,11 @@ fun FdWalletCard(
             when (tpl) {
                 CardTpl.ID -> {
                     Spacer(Modifier.weight(1f))
-                    Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Bottom) {
-                        CardPhoto(photoFile, character, shared, Modifier.width(w * .26f).height(w * .26f / .78f))
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                            CardLabel("HOLDER", holder.uppercase(), ink)
-                            Text(doc.tail(), style = fdText(16f, color = ink, spacing = .06f), maxLines = 1)
-                            CardLabel(if (until != null) "VALID UNTIL" else "ADDED", (until ?: fmtDate(doc.createdAt)).uppercase(), ink)
-                        }
+                    // No holder photo on the card: holder, number and validity only.
+                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                        CardLabel("HOLDER", holder.uppercase(), ink)
+                        Text(doc.tail(), style = fdText(16f, color = ink, spacing = .06f), maxLines = 1)
+                        CardLabel(if (until != null) "VALID UNTIL" else "ADDED", (until ?: fmtDate(doc.createdAt)).uppercase(), ink)
                     }
                 }
                 CardTpl.PAPER -> {
@@ -347,21 +345,6 @@ private fun CardLabel(label: String, value: String, ink: Color, modifier: Modifi
     Column(modifier, horizontalAlignment = if (end) Alignment.End else Alignment.Start) {
         Text(label, style = fdText(9f, FontWeight.Medium, ink.copy(alpha = .75f), spacing = .08f))
         Text(value, style = fdText(12f, FontWeight.SemiBold, ink, spacing = .03f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-    }
-}
-
-/** `.wphoto`: the holder's picture (photo, character, house for Common, or a person outline). */
-@Composable
-private fun CardPhoto(photoFile: String?, character: String?, shared: Boolean, modifier: Modifier) {
-    val shape = RoundedCornerShape(10.dp)
-    val photo = rememberVaultImage(photoFile, 500)
-    val res = characterRes(character)
-    Box(modifier.clip(shape).background(Color.White.copy(alpha = .16f)).border(1.dp, Color.White.copy(alpha = .28f), shape), contentAlignment = Alignment.Center) {
-        when {
-            photo != null -> Image(photo, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-            res != null && !shared -> Image(painterResource(res), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-            else -> FdIcon(if (shared) "house" else "user", 30.dp, 1.5f, Color.White)
-        }
     }
 }
 
