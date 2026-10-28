@@ -80,6 +80,19 @@ val MIGRATION_6_7 = object : Migration(6, 7) {
     }
 }
 
+/** v8: sharing a group between accounts, and the per-group backup choice. Columns only; nothing changes for existing data. */
+val MIGRATION_7_8 = object : Migration(7, 8) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE vault_groups ADD COLUMN backupAll INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE vault_groups ADD COLUMN shareFolder TEXT")
+        db.execSQL("ALTER TABLE vault_groups ADD COLUMN shareIndex TEXT")
+        db.execSQL("ALTER TABLE vault_groups ADD COLUMN peers TEXT")
+        db.execSQL("ALTER TABLE members ADD COLUMN origin TEXT")
+        db.execSQL("ALTER TABLE documents ADD COLUMN origin TEXT")
+        db.execSQL("ALTER TABLE passwords ADD COLUMN origin TEXT")
+    }
+}
+
 val ALL_MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_1_2,
     MIGRATION_2_3,
@@ -87,4 +100,5 @@ val ALL_MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_4_5,
     MIGRATION_5_6,
     MIGRATION_6_7,
+    MIGRATION_7_8,
 )

@@ -18,6 +18,9 @@ object Countries {
         Locale.getISOCountries().associateBy { runCatching { region(it).isO3Country }.getOrDefault("") } + ("D" to "DE")
     }
 
+    /** Short label for filter pills: the ISO code, with the familiar USA / UK. */
+    fun short(code: String): String = when (code) { "US" -> "USA"; "GB" -> "UK"; else -> code }
+
     fun name(code: String): String = OVERRIDES[code] ?: runCatching { region(code).getDisplayCountry(Locale.ENGLISH) }.getOrDefault("").ifBlank { code }
 
     private fun region(code: String): Locale = Locale.Builder().setRegion(code).build()

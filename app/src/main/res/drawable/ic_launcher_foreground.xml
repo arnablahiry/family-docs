@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Two stacked wallet cards, marigold on ink. 108dp canvas, art inside the 66dp safe zone. -->
+<!-- Two stacked wallet cards, marigold on ink. 108dp canvas; scaled to 80% and centred so it sits well inside the 66dp safe zone with room around it (round and squircle masks included). -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <group android:pivotX="54" android:pivotY="54" android:scaleX="0.8" android:scaleY="0.8" android:translateX="1" android:translateY="-2">
     <path android:fillColor="#7C8BB0" android:pathData="M36,34h40a6,6 0,0 1,6 6v22a6,6 0,0 1,-6 6H36a6,6 0,0 1,-6 -6V40a6,6 0,0 1,6 -6z"/>
     <path android:fillColor="#E3962E" android:pathData="M30,44h42a6,6 0,0 1,6 6v22a6,6 0,0 1,-6 6H30a6,6 0,0 1,-6 -6V50a6,6 0,0 1,6 -6z"/>
     <path android:fillColor="#F6D9A6" android:pathData="M32,54h9a2,2 0,0 1,2 2v6a2,2 0,0 1,-2 2h-9a2,2 0,0 1,-2 -2v-6a2,2 0,0 1,2 -2z"/>
     <path android:fillColor="#1E2F55" android:pathData="M48,66h22v3H48z M48,59h14v3H48z"/>
+    </group>
 </vector>

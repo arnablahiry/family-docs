@@ -19,10 +19,16 @@ import java.util.concurrent.TimeUnit
 class BackupWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
     override suspend fun doWork(): Result {
         val c = (applicationContext as FamilyDocsApp).container
-        if (!c.settings.value.backupEnabled) return Result.success()
+        val shareOnly = inputData.getBoolean(SHARE_ONLY, false)
+        val backup = c.settings.value.backupEnabled && !shareOnly
+        val sharing = c.repo.groupsNow().any { it.shareIndex != null || it.peerList.isNotEmpty() }
+        if (!backup && !sharing) return Result.success()
         val auth = runCatching { c.backup.authorize() }.getOrElse { return Result.retry() }
         if (auth.hasResolution()) return Result.success() // needs the user; Settings shows "Back up now"
         val token = auth.accessToken ?: return Result.retry()
+        // Shared groups: publish your share and read everyone else's (a failure here never fails the backup).
+        if (sharing) runCatching { c.share.sync(token) }
+        if (!backup) return Result.success()
         return runCatching { c.backup.backup(token, c.settings.value.viewableCopies) }
             .onSuccess { c.settings.update { s -> s.copy(lastBackup = System.currentTimeMillis()) } }
             .fold({ Result.success() }, { Result.retry() })
@@ -30,6 +36,15 @@ class BackupWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
 
     companion object {
         private const val NAME = "familydocs-drive-backup"
+        private const val SHARE_ONLY = "share_only"
+
+        /** At app start: read what the other members of shared groups changed (and publish yours). */
+        fun syncShares(context: Context) {
+            val req = androidx.work.OneTimeWorkRequestBuilder<BackupWorker>()
+                .setInputData(androidx.work.workDataOf(SHARE_ONLY to true))
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build()
+            WorkManager.getInstance(context).enqueueUniqueWork("$NAME-share", androidx.work.ExistingWorkPolicy.KEEP, req)
+        }
 
         /** One backup as soon as there's a connection (after sign-up, or before signing out). */
         fun runNow(context: Context) {

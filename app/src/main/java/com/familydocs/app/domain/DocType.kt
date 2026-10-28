@@ -5,7 +5,7 @@ package com.familydocs.app.domain
  * Order matters: the first matching rule wins ("Vaccination certificate" → vaccine, not certificate).
  * Kept free of Android imports so it can be unit-tested on the JVM.
  */
-enum class DocIcon { HOUSE, BOLT, FINGERPRINT, CARD, PASSPORT, PLANE, RESIDENCE, CAR, BALLOT, SHIELD, SYRINGE, BANK, CAP, CERTIFICATE, MEDICAL, RECEIPT, ID, FILE, KEY, PEOPLE }
+enum class DocIcon { HOUSE, BOLT, FINGERPRINT, CARD, PASSPORT, PLANE, RESIDENCE, CAR, BALLOT, SHIELD, SYRINGE, BANK, CAP, CERTIFICATE, MEDICAL, RECEIPT, ID, FILE, KEY, PEOPLE, TICKET, BED, TRAIN }
 
 data class DocType(
     val key: String,
@@ -21,6 +21,13 @@ object DocTypes {
     private val I = RegexOption.IGNORE_CASE
 
     private val RULES: List<Pair<Regex, DocType>> = listOf(
+        // Event documents (tickets, bookings, passes) first, so "Car rental" isn't read as a rental agreement.
+        Regex("flight|boarding|airline|\\bpnr\\b|e-?ticket", I) to DocType("flight", "Flight ticket", DocIcon.PLANE, 0xFF2B7BB9),
+        Regex("transport pass|travel ?card|metro|oyster|bus pass|rail ?pass|interrail|eurail|\\bpass\\b", I) to DocType("pass", "Transport pass", DocIcon.CARD, 0xFF2F8F83),
+        Regex("\\btrain\\b|\\brail(way)?\\b|\\bbus\\b|coach|ferry", I) to DocType("train", "Train / bus ticket", DocIcon.TRAIN, 0xFFB0603A),
+        Regex("ticket|admission|concert|museum|\\bmatch\\b", I) to DocType("ticket", "Event ticket", DocIcon.TICKET, 0xFFC2477F),
+        Regex("hotel|hostel|airbnb|\\bbooking\\b|reservation|accommodation|check-?in", I) to DocType("hotel", "Hotel booking", DocIcon.BED, 0xFF8A55A8),
+        Regex("car rental|rent(al)? ?a? ?car|hertz|avis|europcar|sixt", I) to DocType("rental", "Car rental", DocIcon.CAR, 0xFFC07A2B),
         Regex("aadh?aa?r|uidai|आधार", I) to DocType("aadhaar", "Aadhaar", DocIcon.FINGERPRINT, 0xFFD9822B),
         Regex("\\bpan\\b|permanent account", I) to DocType("pan", "PAN Card", DocIcon.CARD, 0xFF2F6FB0),
         Regex("passport|διαβατ|pasaporte|reisepass", I) to DocType("passport", "Passport", DocIcon.PASSPORT, 0xFF284A80),
@@ -48,8 +55,17 @@ object DocTypes {
         "Social Security", "Health Insurance", "Birth Certificate", "Bank Passbook", "Vaccination Record", "Degree Certificate",
     )
 
+    /** Types offered when adding a document to an event (they set the name, so the icon and colour follow). */
+    val EVENT_SUGGESTIONS = listOf("Flight ticket", "Train / bus ticket", "Event ticket", "Transport pass", "Hotel booking", "Car rental", "Travel insurance")
+
     /** Empty field templates used when OCR finds nothing (or the user skips the file). */
     val TEMPLATES: Map<String, List<String>> = mapOf(
+        "flight" to listOf("Booking ref (PNR)", "Flight No.", "From", "To", "Departure", "Seat"),
+        "train" to listOf("Booking ref", "Train / Bus No.", "From", "To", "Departure", "Seat / Coach"),
+        "ticket" to listOf("Ticket No.", "Event / Place", "Date", "Seat"),
+        "pass" to listOf("Pass No.", "Valid From", "Valid Until", "Zones"),
+        "hotel" to listOf("Booking ref", "Hotel", "Address", "Check-in", "Check-out"),
+        "rental" to listOf("Booking ref", "Company", "Pick-up", "Drop-off"),
         "aadhaar" to listOf("Aadhaar Number", "Name", "Date of Birth", "Gender", "Address"),
         "pan" to listOf("PAN", "Name", "Father's Name", "Date of Birth"),
         "passport" to listOf("Passport No.", "Surname", "Given Names", "Nationality", "Date of Birth", "Date of Issue", "Date of Expiry"),

@@ -31,6 +31,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -140,7 +141,7 @@ fun MemberScreen(memberId: String, onBack: () -> Unit, onEdit: () -> Unit, onPas
         val rubber = remember { RubberBand(scope) }
         CompositionLocalProvider(LocalOverscrollConfiguration provides null) {
         LazyColumn(Modifier.fillMaxSize().nestedScroll(rubber), state = list, contentPadding = PaddingValues(bottom = 120.dp)) {
-            item { FdTopBar("", onBack) { FdIconButton("edit", onEdit, iconSize = 20.dp, description = "Edit ${m.name}") } }
+            item { FdTopBar("", onBack) { if (m.origin == null) FdIconButton("edit", onEdit, iconSize = 20.dp, description = "Edit ${m.name}") } }
             // ---- hero ----
             item {
                 Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -231,7 +232,8 @@ fun MemberScreen(memberId: String, onBack: () -> Unit, onEdit: () -> Unit, onPas
             }
         }
         }
-        FdFab("Add document", "plus", onAddDocument, Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 18.dp, bottom = 18.dp))
+        // Someone shared by another member of the group: read-only here (they add documents on their phone).
+        if (m.origin == null) FdFab("Add document", "plus", onAddDocument, Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 18.dp, bottom = 18.dp))
     }
 }
 
@@ -261,12 +263,13 @@ private fun CountryPill(code: String, count: Int, on: Boolean, onClick: () -> Un
     val border by animateColorAsState(if (on) c.primary else c.line, tween(200), label = "pillB")
     Row(
         Modifier.alpha(a).clip(RoundedCornerShape(99.dp)).background(if (on) c.mix(c.primary, .08f, c.surface) else c.surface)
-            .border(1.5.dp, border, RoundedCornerShape(99.dp)).clickable(onClick = onClick).padding(start = 8.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp),
+            .border(1.5.dp, border, RoundedCornerShape(99.dp)).clickable(onClick = onClick).padding(start = 11.dp, end = 8.dp, top = 7.dp, bottom = 7.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp),
     ) {
         FdFlag(code, 20.dp, greyscale = !on)
-        Text(Countries.name(code), style = fdText(13f))
-        Box(Modifier.clip(RoundedCornerShape(99.dp)).background(c.surface2).padding(horizontal = 7.dp)) { Text("$count", style = fdText(11f, color = c.muted, lineHeight = 18f)) }
+        Text(Countries.short(code), style = fdText(14f, FontWeight.SemiBold, spacing = .02f))
+        Box(Modifier.defaultMinSize(minWidth = 24.dp).clip(RoundedCornerShape(99.dp)).background(c.mix(c.fg, .07f, c.surface)).padding(horizontal = 8.dp, vertical = 2.dp),
+            contentAlignment = Alignment.Center) { Text("$count", style = fdText(12f, FontWeight.Medium, c.muted, lineHeight = 18f)) }
     }
 }
 
@@ -307,14 +310,33 @@ private class RubberBand(private val scope: kotlinx.coroutines.CoroutineScope) :
         return Offset(0f, next - o)
     }
 
-    /** Degrees the cards lean while the list moves (scrolls and flings alike); eases back to level when it stops. */
+    /**
+     * Degrees the cards lean while the list moves: pulled down (dy > 0) they tip towards you, pushed up they tip away.
+     * The finger's speed sets a target (a few degrees at most); the lean follows it on a soft spring every frame and
+     * eases back to level when the finger stops, so it stays smooth with touch.
+     */
     var tilt by mutableFloatStateOf(0f); private set
-    private var level: kotlinx.coroutines.Job? = null
+    private var target = 0f
+    private var velocity = 0f
+    private var lastInput = 0L
+    private var loop: kotlinx.coroutines.Job? = null
     private fun lean(dy: Float) {
         if (dy == 0f) return
-        tilt = (tilt * .7f + dy * .05f).coerceIn(-7f, 7f)
-        level?.cancel()
-        level = scope.launch { kotlinx.coroutines.delay(60); animate(tilt, 0f, animationSpec = spring(dampingRatio = .7f, stiffness = 110f)) { v, _ -> tilt = v } }
+        target = (target * .75f + dy * .25f * .18f).coerceIn(-9f, 9f)  // dy in px (≈ .5° per dp of finger travel per frame)
+        lastInput = System.nanoTime()
+        if (loop?.isActive == true) return
+        loop = scope.launch {
+            var last = androidx.compose.runtime.withFrameNanos { it }
+            while (true) {
+                val now = androidx.compose.runtime.withFrameNanos { it }
+                val dt = ((now - last) / 1e9f).coerceIn(0f, .032f); last = now
+                if (System.nanoTime() - lastInput > 70_000_000L) target *= Math.pow(.02, dt.toDouble()).toFloat()
+                val k = 170f; val c = 2f * .9f * kotlin.math.sqrt(k)
+                velocity += (k * (target - tilt) - c * velocity) * dt
+                tilt += velocity * dt
+                if (abs(target) < .01f && abs(tilt) < .01f && abs(velocity) < .05f) { tilt = 0f; velocity = 0f; target = 0f; break }
+            }
+        }
     }
 
     override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
@@ -323,7 +345,7 @@ private class RubberBand(private val scope: kotlinx.coroutines.CoroutineScope) :
         settle?.cancel()
         val resist = 1f / (1f + abs(value) / 320f)
         value = (value + available.y * .5f * resist).coerceIn(-420f, 620f)
-        lean(available.y * .4f)   // stretching / squishing at the ends leans them too
+        lean(available.y)   // stretching / squishing at the ends leans them too
         return Offset(0f, available.y)
     }
 

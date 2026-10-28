@@ -107,7 +107,8 @@ class DriveBackup(
 
     suspend fun backup(accessToken: String, viewableCopies: Boolean = false, onProgress: (String) -> Unit = {}): Report = running.withLock { withContext(Dispatchers.IO) {
         val drive = DriveClient(accessToken)
-        val s = repo.snapshot()
+        val everything = repo.snapshot()
+        val s = scoped(everything)
         val k = keyFor(drive); val key = k.key; val salt = k.id
         fun seal(b: ByteArray) = BackupCrypto.seal(b, key, salt)
         val selfName = s.account?.name ?: "Me"
@@ -203,7 +204,8 @@ class DriveBackup(
 
         // Anything in Drive that no longer exists on the phone goes to Drive's bin (recoverable for 30 days).
         onProgress("Tidying up…")
-        val liveDocs = s.documents.map { it.id }.toSet(); val liveMembers = s.members.map { it.id }.toSet()
+        // (everything still on the phone counts as live: switching a group back to "Me + Common" doesn't delete older copies)
+        val liveDocs = everything.documents.map { it.id }.toSet(); val liveMembers = everything.members.map { it.id }.toSet()
         // only when documents or people were added/removed since the last backup
         if (!same("tidy", sha((liveDocs.sorted() + "|" + liveMembers.sorted() + "|" + s.groups.map { it.id + it.name }.sorted()).joinToString(",")))) memberFolders.values.forEach { mf ->
             drive.children(mf).filter { it.mime == DriveClient.FOLDER && it.props[P_DOC] != null && it.props[P_DOC] !in liveDocs }.forEach { drive.trash(it.id); removed++ }
@@ -221,7 +223,8 @@ class DriveBackup(
             .put("format", 2)
             .put("account", s.account?.let { accountJson(it) } ?: JSONObject.NULL)
             .put("members", JSONArray(s.members.map { memberJson(it) }))
-            .put("groups", JSONArray(s.groups.map { JSONObject().put("id", it.id).put("name", it.name).put("code", it.code).put("created", it.createdAt) }))
+            .put("groups", JSONArray(s.groups.map { JSONObject().put("id", it.id).put("name", it.name).put("code", it.code).put("created", it.createdAt)
+                .put("all", it.backupAll).put("shareFolder", it.shareFolder ?: JSONObject.NULL).put("shareIndex", it.shareIndex ?: JSONObject.NULL).put("peers", it.peers ?: JSONObject.NULL) }))
             .put("documents", JSONArray(s.documents.map { JSONObject().put("id", it.id).put("member", it.memberId).put("order", it.sortOrder ?: JSONObject.NULL) }))
         val indexText = index.toString()
         if (!same("index", sha(indexText))) drive.upsertFile(root, "Family Docs vault.fdenc", seal(indexText.toByteArray()), OCTET, mapOf(P_KIND to "index", P_DOC_FILE to "index"),
@@ -304,7 +307,8 @@ class DriveBackup(
         files.clear()
         blobs.forEach { (id, data) -> files.put(data, id) }
         val groups = index.optJSONArray("groups")?.let { a -> (0 until a.length()).map { a.getJSONObject(it) }
-            .map { com.familydocs.app.data.GroupEntity(it.getString("id"), it.getString("name"), it.getString("code"), it.optLong("created")) } }.orEmpty()
+            .map { com.familydocs.app.data.GroupEntity(it.getString("id"), it.getString("name"), it.getString("code"), it.optLong("created"),
+                backupAll = it.optBoolean("all"), shareFolder = it.str("shareFolder"), shareIndex = it.str("shareIndex"), peers = it.str("peers")) } }.orEmpty()
         repo.restore(VaultRepository.Snapshot(account, memberEntities, docs, pws, events, groups))
         keys.install(k)
         com.familydocs.app.events.EventReminders.rescheduleAll(context, events)
@@ -314,7 +318,7 @@ class DriveBackup(
     private fun docJson(d: DocumentEntity) = JSONObject().put("id", d.id).put("member", d.memberId).put("name", d.name).put("mime", d.fileMime ?: JSONObject.NULL)
         .put("display", d.display.name).put("fields", d.fieldsJson).put("text", d.rawText).put("ocr", d.readByOcr)
         .put("country", d.country ?: JSONObject.NULL).put("created", d.createdAt).put("updated", d.updatedAt).put("event", d.eventId ?: JSONObject.NULL)
-        .put("flag", d.showFlag ?: JSONObject.NULL)
+        .put("flag", d.showFlag ?: JSONObject.NULL).put("origin", d.origin ?: JSONObject.NULL)
         .put("more", JSONArray(d.attachments.drop(1).map { it.mime }))
 
     private fun docFromJson(j: JSONObject, fileId: String?, picId: String?) = DocumentEntity(
@@ -325,6 +329,7 @@ class DriveBackup(
         country = if (j.isNull("country")) null else j.optString("country"), createdAt = j.optLong("created"), updatedAt = j.optLong("updated"),
         eventId = if (!j.has("event") || j.isNull("event")) null else j.getString("event"),
         showFlag = if (!j.has("flag") || j.isNull("flag")) null else j.getBoolean("flag"),
+        origin = j.str("origin"),
     )
 
     private fun eventJson(e: com.familydocs.app.data.EventEntity) = JSONObject().put("id", e.id).put("name", e.name).put("art", e.art)
@@ -338,18 +343,32 @@ class DriveBackup(
     )
 
     private fun memberJson(m: MemberEntity) = JSONObject().put("id", m.id).put("name", m.name).put("relation", m.relation)
-        .put("self", m.isSelf).put("shared", m.shared).put("created", m.createdAt).put("avatar", m.avatar ?: JSONObject.NULL).put("group", m.groupId ?: JSONObject.NULL)
+        .put("self", m.isSelf).put("shared", m.shared).put("created", m.createdAt).put("avatar", m.avatar ?: JSONObject.NULL).put("group", m.groupId ?: JSONObject.NULL).put("origin", m.origin ?: JSONObject.NULL)
     private fun memberFromJson(j: JSONObject, photo: String?) = MemberEntity(j.getString("id"), j.getString("name"), j.getString("relation"), photo,
         j.optBoolean("self"), j.optLong("created"), j.optBoolean("shared"), if (j.isNull("avatar")) null else j.optString("avatar"),
-        groupId = if (!j.has("group") || j.isNull("group")) null else j.getString("group"))
+        groupId = if (!j.has("group") || j.isNull("group")) null else j.getString("group"), origin = j.str("origin"))
 
-    private fun pwJson(p: PasswordEntity) = JSONObject().put("id", p.id).put("member", p.memberId).put("site", p.site).put("user", p.username).put("pass", p.password).put("created", p.createdAt)
-    private fun pwFromJson(j: JSONObject) = PasswordEntity(j.getString("id"), j.getString("member"), j.getString("site"), j.getString("user"), j.getString("pass"), j.optLong("created"))
+    private fun pwJson(p: PasswordEntity) = JSONObject().put("id", p.id).put("member", p.memberId).put("site", p.site).put("user", p.username).put("pass", p.password).put("created", p.createdAt).put("origin", p.origin ?: JSONObject.NULL)
+    private fun pwFromJson(j: JSONObject) = PasswordEntity(j.getString("id"), j.getString("member"), j.getString("site"), j.getString("user"), j.getString("pass"), j.optLong("created"), j.str("origin"))
 
     private fun accountJson(a: AccountEntity) = JSONObject().put("name", a.name).put("cc", a.countryCode).put("phone", a.phone).put("email", a.backupEmail)
         .put("google", a.googleLinked).put("countries", a.countries)
     private fun accountFromJson(j: JSONObject, photo: String?) = AccountEntity(name = j.getString("name"), countryCode = j.getString("cc"), phone = j.getString("phone"),
         backupEmail = j.getString("email"), photoFile = photo, googleLinked = j.optBoolean("google"), countries = j.optString("countries", "IN,GR"))
+
+    private fun JSONObject.str(k: String): String? = if (!has(k) || isNull(k)) null else optString(k).ifEmpty { null }
+
+    /**
+     * What this phone backs up: you and each group's Common vault; for a group set to "Whole group", everyone in it too.
+     * Logins: only yours and the Common ones, never other people's.
+     */
+    private fun scoped(all: VaultRepository.Snapshot): VaultRepository.Snapshot {
+        val whole = all.groups.filter { it.backupAll }.map { it.id }.toSet()
+        val members = all.members.filter { it.isSelf || it.shared || it.groupId in whole }
+        val ids = members.map { it.id }.toSet()
+        val loginOwners = members.filter { it.isSelf || it.shared }.map { it.id }.toSet()
+        return all.copy(members = members, documents = all.documents.filter { it.memberId in ids }, passwords = all.passwords.filter { it.memberId in loginOwners })
+    }
 
     private fun hex(argb: Long) = "#%06X".format(argb and 0xFFFFFF)
 

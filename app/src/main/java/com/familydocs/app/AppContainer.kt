@@ -17,13 +17,14 @@ import com.familydocs.app.security.SettingsStore
 /** Hand-rolled dependency container (no DI framework needed at this size). */
 class AppContainer(context: Context) {
     private val app = context.applicationContext
+    val appContext: Context get() = app
     val crypto = CryptoManager(app)
     val files = FileStore(app, crypto)
     val db: AppDatabase by lazy { AppDatabase.build(app, crypto.databasePassphrase()) }
     val repo: VaultRepository by lazy {
-        // Any change to the vault: back up to Drive a couple of minutes later (when backup is on).
+        // Any change to the vault: back up to Drive / update shared groups a couple of minutes later.
         VaultRepository(db.dao(), files).also { r ->
-            r.onChanged = { if (settings.value.backupEnabled) BackupWorker.soon(app) }
+            r.onChanged = { BackupWorker.soon(app) } // (it checks whether backup or group sharing is on)
             r.groupId.value = settings.value.currentGroup
         }
     }
@@ -37,6 +38,8 @@ class AppContainer(context: Context) {
     /** In-app updates from the GitHub releases (checked at app start; Settings › About shows and installs them). */
     val updater = com.familydocs.app.update.AppUpdater(app)
     val backup: DriveBackup by lazy { DriveBackup(app, repo, files, BackupKeyStore(app, crypto)) }
+    /** Groups shared between accounts (encrypted shares in each member's Drive). */
+    val share: com.familydocs.app.backup.GroupShare by lazy { com.familydocs.app.backup.GroupShare(app, db.dao(), files) }
 
     /** Shows group [id] on Home and remembers it. */
     fun selectGroup(id: String?) { repo.groupId.value = id; settings.update { it.copy(currentGroup = id) } }

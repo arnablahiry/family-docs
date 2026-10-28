@@ -153,7 +153,9 @@ fun EventScreen(eventId: String, onBack: () -> Unit, onEdit: () -> Unit, onDocum
     val allDocs by app.repo.allDocuments.collectAsStateWithLifecycle(emptyList())
     val ownDocs by app.repo.eventDocuments(eventId).collectAsStateWithLifecycle(emptyList())
     var picking by remember { mutableStateOf(false) }
+    var pickSuggested by remember { mutableStateOf(emptySet<String>()) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var hideSuggestion by remember { mutableStateOf(false) }
     val e = event ?: return
     val self = members.firstOrNull { it.isSelf }
     val people = e.peopleIds.mapNotNull { id -> members.firstOrNull { it.id == id } }
@@ -186,26 +188,44 @@ fun EventScreen(eventId: String, onBack: () -> Unit, onEdit: () -> Unit, onDocum
                 FdListItem("Reminder", Events.reminderLabel(e.remindDays) + if (e.remindDays >= 0) " · a notification on this phone" else "", first = true, icon = "bell", onClick = onEdit)
             }
             FdSectionTitle("Documents") { Text("${pinned.size + ownDocs.size}", style = fdText(11f, FontWeight.Medium, c.muted)) }
-            if (suggestions.isNotEmpty()) FdBanner("sparkle", "Add ${suggestions.size} travel document${if (suggestions.size == 1) "" else "s"} of the people going?",
+            // ✕ hides it while you're on this page; it's offered again the next time you open the event.
+            // "View & add" opens the vault list with these already ticked; nothing is added until you tap Add there.
+            if (suggestions.isNotEmpty() && !hideSuggestion) FdBanner("sparkle", "${suggestions.size} travel document${if (suggestions.size == 1) "" else "s"} of the people going",
                 Modifier.padding(start = 20.dp, end = 20.dp, bottom = 10.dp)) {
-                FdTextButton("Add", {
-                    scope.launch { app.repo.setEventPins(e.id, e.pinIds + suggestions.map { it.id }); toast.show("Added ${suggestions.size} document${if (suggestions.size == 1) "" else "s"}") }
-                })
+                FdTextButton("View & add", { pickSuggested = suggestions.map { it.id }.toSet(); picking = true })
+                FdIconButton("close", { hideSuggestion = true }, size = 32.dp, iconSize = 15.dp, tint = c.muted, description = "Not now")
             }
-            if (pinned.isEmpty() && ownDocs.isEmpty()) FdEmpty("No documents yet. Pin passports, visas or IDs from the family's vaults, or add a ticket or booking.")
-            else FdList {
-                pinned.forEachIndexed { i, d ->
-                    val owner = members.firstOrNull { it.id == d.memberId }?.name.orEmpty()
-                    FdListItem(d.name, "$owner · ${d.tail()}", first = i == 0, onClick = { onDocument(d.id) }, leading = { FdDocIcon(d, 42.dp) })
+            run {
+                // By person: everyone going (then anyone else whose documents are pinned), and Common last: the Common
+                // vault's documents plus the tickets and bookings added only for this event.
+                val owners = (people + pinned.mapNotNull { d -> members.firstOrNull { it.id == d.memberId } }.filter { !it.shared })
+                    .distinctBy { it.id }
+                owners.forEach { m ->
+                    val mine = pinned.filter { it.memberId == m.id }
+                    if (mine.isEmpty()) return@forEach
+                    EventDocGroup(m.name, mine.size) { FdAvatar(m.name, 24.dp, photoFile = m.photoFile, character = m.avatar) }
+                    FdList { mine.forEachIndexed { i, d -> FdListItem(d.name, d.tail(), first = i == 0, onClick = { onDocument(d.id) }, leading = { FdDocIcon(d, 42.dp) }) } }
                 }
-                ownDocs.forEachIndexed { i, d ->
-                    FdListItem(d.name, "Only for this event", first = pinned.isEmpty() && i == 0, onClick = { onDocument(d.id) }, leading = { FdDocIcon(d, 42.dp) })
+                // Common is always there: the Common vault's pinned documents and everything uploaded for the event.
+                val common = pinned.filter { d -> members.firstOrNull { it.id == d.memberId }?.shared == true }
+                run {
+                    EventDocGroup("Common", common.size + ownDocs.size) {
+                        Box(Modifier.size(24.dp).clip(CircleShape).background(c.mix(c.accent, .16f, c.surface)), contentAlignment = Alignment.Center) { FdIcon("people", 15.dp, tint = c.accent) }
+                    }
+                    if (common.isEmpty() && ownDocs.isEmpty()) Text("Tickets, hotel bookings, passes… for everyone going.", style = fdText(13.5f, color = c.muted),
+                        modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth().dashedBorder(c.line, radius = 18.dp).padding(horizontal = 16.dp, vertical = 14.dp))
+                    else FdList {
+                        common.forEachIndexed { i, d -> FdListItem(d.name, d.tail(), first = i == 0, onClick = { onDocument(d.id) }, leading = { FdDocIcon(d, 42.dp) }) }
+                        ownDocs.forEachIndexed { i, d ->
+                            FdListItem(d.name, "For everyone going", first = common.isEmpty() && i == 0, onClick = { onDocument(d.id) }, leading = { FdDocIcon(d, 42.dp) })
+                        }
+                    }
+                    // Uploads for the event belong to the Common vault (you, if there's none) and show only here.
+                    FdButton("Upload document", { (members.firstOrNull { it.shared } ?: self)?.let { onAddTicket(it.id) } },
+                        Modifier.padding(start = 20.dp, end = 20.dp, top = 10.dp), BtnKind.Ghost, icon = "upload")
                 }
             }
-            Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                FdButton("From vaults", { picking = true }, Modifier.weight(1f), BtnKind.Ghost, icon = "people")
-                FdButton("Add ticket", { self?.let { onAddTicket(it.id) } }, Modifier.weight(1f), BtnKind.Ghost, icon = "plus")
-            }
+            FdButton("Pin from people's vaults", { pickSuggested = emptySet(); picking = true }, Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp), BtnKind.Ghost, icon = "people")
             if (e.notes.isNotBlank()) {
                 FdSectionTitle("Notes")
                 FdList { Text(e.notes, style = fdText(13f, lineHeight = 18f), modifier = Modifier.padding(14.dp)) }
@@ -214,9 +234,11 @@ fun EventScreen(eventId: String, onBack: () -> Unit, onEdit: () -> Unit, onDocum
         }
     }
 
-    if (picking) PinSheet(e, members, allDocs.filter { it.eventId == null }, onToggle = { id ->
-        scope.launch { app.repo.setEventPins(e.id, if (id in e.pinIds) e.pinIds - id else e.pinIds + id) }
-    }, onDismiss = { picking = false })
+    if (picking) PinSheet(e, members, allDocs.filter { it.eventId == null }, pickSuggested, onApply = { ids ->
+        val added = ids.count { it !in e.pinIds }
+        scope.launch { app.repo.setEventPins(e.id, ids); if (added > 0) toast.show("Added $added document${if (added == 1) "" else "s"}") }
+        picking = false; pickSuggested = emptySet()
+    }, onDismiss = { picking = false; pickSuggested = emptySet() })
 
     if (confirmDelete) FdConfirmSheet(
         "Delete this event?", "Documents pinned from the vaults stay where they are. Tickets and bookings added only for this event are deleted.", "Delete",
@@ -239,10 +261,14 @@ private fun suggestedPins(e: EventEntity, members: List<MemberEntity>, docs: Lis
 }
 
 @Composable
-private fun PinSheet(e: EventEntity, members: List<MemberEntity>, docs: List<DocumentEntity>, onToggle: (String) -> Unit, onDismiss: () -> Unit) {
+private fun PinSheet(e: EventEntity, members: List<MemberEntity>, docs: List<DocumentEntity>, suggested: Set<String>, onApply: (List<String>) -> Unit, onDismiss: () -> Unit) {
     val c = Fd.c
+    // A checklist: what's pinned is ticked, plus the suggested travel documents; one button applies it.
+    var sel by remember { mutableStateOf(e.pinIds.toSet() + suggested) }
+    val added = sel.count { it !in e.pinIds }
+    val removed = e.pinIds.count { it !in sel }
     FdSheet(onDismiss) {
-        SheetTitle("Documents for ${e.name}", "Pinned documents stay in their owner's vault.")
+        SheetTitle("Documents for ${e.name}", (if (suggested.isNotEmpty()) "The travel documents of the people going are ticked. " else "") + "Pinned documents stay in their owner's vault.")
         Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
             members.forEach { m ->
                 val mine = docs.filter { it.memberId == m.id }
@@ -250,8 +276,9 @@ private fun PinSheet(e: EventEntity, members: List<MemberEntity>, docs: List<Doc
                 Text(m.name.uppercase(), style = fdText(11f, FontWeight.SemiBold, c.muted, spacing = .09f), modifier = Modifier.padding(top = 10.dp, bottom = 6.dp))
                 Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(c.surface).border(1.dp, c.line, RoundedCornerShape(18.dp))) {
                     mine.forEachIndexed { i, d ->
-                        val on = d.id in e.pinIds
-                        FdListItem(d.name, d.tail(), first = i == 0, onClick = { onToggle(d.id) }, leading = { FdDocIcon(d, 42.dp) }, trailing = {
+                        val on = d.id in sel
+                        FdListItem(d.name, (if (d.id in suggested) "Suggested · " else "") + d.tail(), first = i == 0, onClick = { sel = if (on) sel - d.id else sel + d.id },
+                            leading = { FdDocIcon(d, 42.dp) }, trailing = {
                             Box(Modifier.size(26.dp).clip(CircleShape).background(if (on) c.primary else androidx.compose.ui.graphics.Color.Transparent)
                                 .border(1.5.dp, if (on) c.primary else c.line, CircleShape), contentAlignment = Alignment.Center) {
                                 if (on) FdIcon("check", 16.dp, 2.6f, c.onPrimary)
@@ -263,7 +290,11 @@ private fun PinSheet(e: EventEntity, members: List<MemberEntity>, docs: List<Doc
             }
         }
         Spacer(Modifier.height(14.dp))
-        FdButton("Done", onDismiss)
+        FdButton(when {
+            added > 0 -> "Add $added document${if (added == 1) "" else "s"}" + if (removed > 0) " · remove $removed" else ""
+            removed > 0 -> "Remove $removed"
+            else -> "Done"
+        }, { onApply(docs.filter { it.id in sel }.map { it.id }) })
     }
 }
 
@@ -439,5 +470,16 @@ private fun DateBox(text: String, placeholder: Boolean = false, onClick: () -> U
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(text, style = fdText(14.5f, color = if (placeholder) c.muted else c.fg), modifier = Modifier.weight(1f), maxLines = 1)
+    }
+}
+
+/** Heading of one person's (or Common's) documents on an event: picture, name and how many. */
+@Composable
+private fun EventDocGroup(name: String, count: Int, picture: @Composable () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(start = 22.dp, end = 22.dp, top = 12.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+        picture()
+        Text(name, style = fdText(13.5f, FontWeight.SemiBold), modifier = Modifier.weight(1f))
+        Text("$count", style = fdText(12.5f, color = Fd.c.muted))
     }
 }

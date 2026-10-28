@@ -93,8 +93,19 @@ fun FamilyScreen(onMember: (String) -> Unit, onSettings: () -> Unit, onDocument:
         if (!app.settings.value.familyPresetDone) { app.repo.ensureFamily(); app.settings.update { it.copy(familyPresetDone = true) } }
     }
     var sheet by remember { mutableStateOf<String?>(null) } // "create" | "join"
+    // Group settings (with a short explanation right after creating / joining): group id, intro, who invited you
+    var settingsFor by remember { mutableStateOf<Triple<String, String?, String?>?>(null) }
+    // First time on Home with a group you made at sign-up: explain backups and sharing once.
+    LaunchedEffect(groups.isNotEmpty()) {
+        val first = groups.firstOrNull() ?: return@LaunchedEffect
+        if (!app.settings.value.groupIntroDone) {
+            app.settings.update { it.copy(groupIntroDone = true) }
+            if (first.peerList.isEmpty()) settingsFor = Triple(first.id, "created", null)
+        }
+    }
     Column(Modifier.fillMaxSize().background(c.bg).statusBarsPadding()) {
-        GroupHeader(groups, gid, onSettings, onCreate = { sheet = "create" }, onJoin = { sheet = "join" })
+        GroupHeader(groups, gid, onSettings, onCreate = { sheet = "create" }, onJoin = { sheet = "join" },
+            onGroupSettings = { id -> settingsFor = Triple(id, null, null) })
         // Switching groups: the old page fades back a touch, the new one rises in and settles.
         AnimatedContent(gid, transitionSpec = {
             (fadeIn(tween(280, delayMillis = 90)) + slideInVertically(tween(380, easing = FdEase)) { it / 16 } + scaleIn(tween(380, easing = FdEase), initialScale = .97f)) togetherWith
@@ -103,14 +114,24 @@ fun FamilyScreen(onMember: (String) -> Unit, onSettings: () -> Unit, onDocument:
     }
     when (sheet) {
         "create" -> GroupSheet("New group", "Its own people, Common vault, events and code. You're in every group.", "Group name, e.g. Flatmates", "Create group",
-            onDismiss = { sheet = null }) { name -> app.selectGroup(app.repo.createGroup(name).id); null }
-        "join" -> GroupSheet("Join a group", "Enter the group's code.", "Group code, e.g. K7#-Q2@-XM4", "Join",
-            onDismiss = { sheet = null }) { code ->
-            val g = app.repo.groupByCode(code)
-            if (g != null) { app.selectGroup(g.id); null }
-            else "No group with this code on this phone. Groups in your Google backup come back when you restore it on a new phone; joining a group from someone else's account isn't available yet."
+            onDismiss = { sheet = null }) { name -> val g = app.repo.createGroup(name); app.selectGroup(g.id); app.settings.update { it.copy(groupIntroDone = true) }; settingsFor = Triple(g.id, "created", null); null }
+        "join" -> GroupSheet("Join a group", "Paste the invite someone in the group sent you. (A code alone opens groups that are already on this phone.)",
+            "Invite (FD1.…) or group code", "Join", onDismiss = { sheet = null }, multiline = true) { text ->
+            val inv = com.familydocs.app.domain.GroupInvite.find(text)
+            if (inv != null) {
+                runCatching { app.share.accept(null, inv) }.fold({ (g, problem) ->
+                    app.selectGroup(g.id); settingsFor = Triple(g.id, "joined", inv.fromName)
+                    problem?.let { com.familydocs.app.backup.BackupWorker.syncShares(app.appContext) }
+                    null
+                }, { it.message ?: "Couldn't use that invite" })
+            } else {
+                val g = app.repo.groupByCode(text)
+                if (g != null) { app.selectGroup(g.id); null }
+                else "No group with this code on this phone. To join someone else's group, ask them for an invite (Group settings › Invite someone) and paste the whole message here."
+            }
         }
     }
+    settingsFor?.let { (id, intro, from) -> GroupSettingsSheet(id, intro, from) { settingsFor = null } }
 }
 
 /** One group's home: its people, search and events (keyed by group, so the switch animation shows the right page). */
@@ -242,7 +263,8 @@ private fun greeting(): String = when (Calendar.getInstance().get(Calendar.HOUR_
  * groups (or ＋ to add one when there are none). The name and code roll to the new group; the menu unfolds below.
  */
 @Composable
-private fun GroupHeader(groups: List<com.familydocs.app.data.GroupEntity>, gid: String?, onSettings: () -> Unit, onCreate: () -> Unit, onJoin: () -> Unit) {
+private fun GroupHeader(groups: List<com.familydocs.app.data.GroupEntity>, gid: String?, onSettings: () -> Unit, onCreate: () -> Unit, onJoin: () -> Unit,
+                        onGroupSettings: (String) -> Unit) {
     val app = LocalContainer.current
     val c = Fd.c
     val account by app.repo.account.collectAsStateWithLifecycle(null)
@@ -295,10 +317,14 @@ private fun GroupHeader(groups: List<com.familydocs.app.data.GroupEntity>, gid: 
                     }
                 }
                 Box(Modifier.padding(horizontal = 14.dp).fillMaxWidth().height(1.dp).background(c.line))
+                gid?.let { cur ->
+                    Row(Modifier.fillMaxWidth().clickable { open = false; onGroupSettings(cur) }.padding(horizontal = 14.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)) { FdIcon("sliders", 18.dp, tint = c.muted); Text("Group settings · backup & sharing", style = fdText(14f)) }
+                }
                 Row(Modifier.fillMaxWidth().clickable { open = false; onCreate() }.padding(horizontal = 14.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)) { FdIcon("plus", 18.dp, tint = c.muted); Text("New group", style = fdText(14f)) }
                 Row(Modifier.fillMaxWidth().clickable { open = false; onJoin() }.padding(horizontal = 14.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)) { FdIcon("key", 18.dp, tint = c.muted); Text("Join with code", style = fdText(14f)) }
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)) { FdIcon("key", 18.dp, tint = c.muted); Text("Join a group", style = fdText(14f)) }
             }
         }
     }
@@ -306,15 +332,17 @@ private fun GroupHeader(groups: List<com.familydocs.app.data.GroupEntity>, gid: 
 
 /** New group / join with code: one field, one button; [onSubmit] returns an error to show, or null when done. */
 @Composable
-private fun GroupSheet(title: String, text: String, placeholder: String, action: String, onDismiss: () -> Unit, onSubmit: suspend (String) -> String?) {
+private fun GroupSheet(title: String, text: String, placeholder: String, action: String, onDismiss: () -> Unit, multiline: Boolean = false, onSubmit: suspend (String) -> String?) {
     val scope = rememberCoroutineScope()
     var value by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     com.familydocs.app.ui.ds.FdSheet(onDismiss) {
         com.familydocs.app.ui.ds.SheetTitle(title, text)
-        FdInput(value, { value = it; error = null }, placeholder = placeholder)
+        FdInput(value, { value = it; error = null }, placeholder = placeholder, singleLine = !multiline)
         error?.let { Text(it, style = fdText(12.5f, color = Fd.c.danger), modifier = Modifier.padding(top = 8.dp)) }
-        com.familydocs.app.ui.ds.FdButton(action, { scope.launch { error = onSubmit(value); if (error == null) onDismiss() } }, Modifier.padding(top = 14.dp), enabled = value.isNotBlank())
+        var busy by remember { mutableStateOf(false) }
+        com.familydocs.app.ui.ds.FdButton(if (busy) "One moment…" else action, { scope.launch { busy = true; error = onSubmit(value); busy = false; if (error == null) onDismiss() } },
+            Modifier.padding(top = 14.dp), enabled = value.isNotBlank() && !busy)
         Spacer(Modifier.height(12.dp))
     }
 }

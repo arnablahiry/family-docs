@@ -27,7 +27,28 @@ data class GroupEntity(
     val name: String,
     val code: String,
     val createdAt: Long = System.currentTimeMillis(),
-)
+    /** Drive backup of this group: false = only you and the Common vault (default); true = everyone in the group. Database version 8. */
+    val backupAll: Boolean = false,
+    /** Your encrypted share for the group in your Drive: its folder and index file (null until you first invite someone). */
+    val shareFolder: String? = null,
+    val shareIndex: String? = null,
+    /** People whose shares you read: JSON [{"key":…,"name":…,"index":…,"at":…}]. */
+    val peers: String? = null,
+) {
+    val peerList: List<Peer> get() = Peer.decode(peers)
+}
+
+/** Another account in a group: their app shares an encrypted index file (Drive "anyone with the link", sealed with the group code). */
+data class Peer(val key: String, val name: String, val index: String, val at: Long = 0L) {
+    companion object {
+        fun encode(list: List<Peer>): String? = if (list.isEmpty()) null else JSONArray(list.map {
+            JSONObject().put("key", it.key).put("name", it.name).put("index", it.index).put("at", it.at) }).toString()
+        fun decode(json: String?): List<Peer> = runCatching {
+            val a = JSONArray(json ?: return emptyList())
+            (0 until a.length()).map { a.getJSONObject(it).let { o -> Peer(o.getString("key"), o.optString("name"), o.getString("index"), o.optLong("at")) } }
+        }.getOrDefault(emptyList())
+    }
+}
 
 @Entity(tableName = "account")
 data class AccountEntity(
@@ -56,6 +77,8 @@ data class MemberEntity(
     val avatar: String? = null,
     /** The group this person belongs to; null for you (you're in every group). Added in database version 7. */
     val groupId: String? = null,
+    /** Who shared this person with you: null = made on this phone; else the other account's key (read-only here). Database version 8. */
+    val origin: String? = null,
 )
 
 enum class DisplayMode { ICON, FROM_FILE, CUSTOM }
@@ -90,6 +113,8 @@ data class DocumentEntity(
     val moreFiles: String? = null,
     /** Position in the person's wallet, set by hold-and-drag (null = in the order added). Added in database version 6. */
     val sortOrder: Int? = null,
+    /** null = added on this phone; else the key of the group member who shared it (read-only here). Database version 8. */
+    val origin: String? = null,
 ) {
     /** Every file of the document (front, back, more pages…), in order. */
     val attachments: List<Attachment> get() = listOfNotNull(fileId?.let { Attachment(it, fileMime ?: "image/jpeg") }) + Attachment.decode(moreFiles)
@@ -111,6 +136,8 @@ data class PasswordEntity(
     val username: String,
     val password: String,
     val createdAt: Long = System.currentTimeMillis(),
+    /** null = saved on this phone; else shared by another group member (Common logins only). Database version 8. */
+    val origin: String? = null,
 )
 
 data class MemberCount(val memberId: String, val n: Int)

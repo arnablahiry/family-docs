@@ -16,5 +16,6 @@ class FamilyDocsApp : Application() {
         if (container.settings.value.backupEnabled) com.familydocs.app.backup.BackupWorker.schedule(this, true)
         container.appScope.launch { container.updater.check() } // quiet check for a newer release
         container.appScope.launch { container.settleGroup() }
+        com.familydocs.app.backup.BackupWorker.syncShares(this) // shared groups: pick up what the others changed
     }
 }

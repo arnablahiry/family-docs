@@ -194,6 +194,7 @@ fun DocIcon.demoName(): String = when (this) {
     DocIcon.PLANE -> "plane"; DocIcon.RESIDENCE -> "homeid"; DocIcon.CAR -> "car"; DocIcon.BALLOT -> "ballot"; DocIcon.SHIELD -> "shield"
     DocIcon.SYRINGE -> "syringe"; DocIcon.BANK -> "bank"; DocIcon.CAP -> "cap"; DocIcon.CERTIFICATE -> "cert"; DocIcon.MEDICAL -> "medical"
     DocIcon.RECEIPT -> "receipt"; DocIcon.ID -> "idcard"; DocIcon.FILE -> "file"; DocIcon.KEY -> "key"; DocIcon.PEOPLE -> "people"
+    DocIcon.TICKET -> "ticket"; DocIcon.BED -> "bed"; DocIcon.TRAIN -> "train"
 }
 
 /** `.dicon`: hue-tinted rounded tile with the type icon (or the chosen picture), initials badge for unknown types. */
@@ -296,7 +297,7 @@ fun FdWalletCard(
     val holder = doc.holder(holderFallback)
 
     BoxWithConstraints(
-        modifier.fillMaxWidth().shadow(shadow, shape, ambientColor = deep, spotColor = deep).clip(shape)
+        modifier.fillMaxWidth().shadow(shadow, shape, ambientColor = Color(0x59000000), spotColor = Color(0x73000000)).clip(shape)
             .border(2.dp, (if (paper) hue else Color.White).copy(alpha = (if (paper) .7f else .75f) * rim), shape)
             .then(if (paper) Modifier.background(sheet).border(1.dp, hue.copy(alpha = .22f), shape)
             else Modifier.background(Brush.linearGradient(listOf(hue, deep), Offset.Zero, Offset(900f, 1100f)))),
@@ -528,7 +529,10 @@ fun FdWalletStack(
         val minGapPx = with(density) { 18.dp.toPx() }
         fun extra(i: Int): Float {
             val s = stretch()
-            return if (s >= 0f) s * .32f * i * (1f + i * .06f) else maxOf(s * .3f, -(stripPx - minGapPx)) * i
+            val rubber = if (s >= 0f) s * .32f * i * (1f + i * .06f) else maxOf(s * .3f, -(stripPx - minGapPx)) * i
+            // While scrolling the cards further down trail behind a little (they fan out, then settle with the lean).
+            val lag = (-tilt() * i * 1.2f * density.density).coerceAtLeast(-(stripPx - minGapPx) * i * .4f)
+            return rubber + if (dragId == null) lag else 0f
         }
         Box(Modifier.fillMaxWidth().layout { m, c ->
             // Stretching grows the stack; squishing keeps its height, so the cards squeeze up towards the first one
@@ -558,7 +562,7 @@ fun FdWalletStack(
                         // below close up over it (no snap behind them at the end).
                         Modifier.zIndex(if (dragging || d.id == landingId) 1000f else i.toFloat()).then(place).height(cardH).alpha(dim)
                             // scrolling: the cards lean back a little with the motion (a touch less further down)
-                            .graphicsLayer { scaleX = lift; scaleY = lift; if (!dragging) { rotationX = tilt() * (1f - i * .05f).coerceAtLeast(.55f); cameraDistance = 16f * density } }
+                            .graphicsLayer { scaleX = lift; scaleY = lift; if (!dragging) { rotationX = -tilt() * (1f - i * .05f).coerceAtLeast(.7f) /* negative: top edge towards you */; cameraDistance = 7f * density } }
                             .onGloballyPositioned { if (isOpen) onOpenBounds(it.boundsInRoot()) }
                             // One gesture handler for both (a separate clickable would grab the touch first):
                             // quick tap → lift / open; hold still ~0.4 s → pick up and drag; move straight away → the list scrolls.

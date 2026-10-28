@@ -51,6 +51,14 @@ class VaultRepository(private val dao: VaultDao, val files: FileStore) {
         onChanged()
         g
     }
+    fun group(id: String) = dao.group(id)
+    /** Group setting: back up the whole group to your Drive, or only you and the Common vault. */
+    suspend fun setGroupBackup(id: String, all: Boolean) = withContext(Dispatchers.IO) {
+        dao.groupNow(id)?.let { dao.upsertGroup(it.copy(backupAll = all)); onChanged() }
+    }
+    suspend fun renameGroup(id: String, name: String) = withContext(Dispatchers.IO) {
+        dao.groupNow(id)?.let { dao.upsertGroup(it.copy(name = name.trim().ifEmpty { it.name })); onChanged() }
+    }
     suspend fun groupByCode(code: String): GroupEntity? = dao.groupsNow().firstOrNull {
         com.familydocs.app.domain.GroupCodes.normalize(it.code) == com.familydocs.app.domain.GroupCodes.normalize(code)
     }

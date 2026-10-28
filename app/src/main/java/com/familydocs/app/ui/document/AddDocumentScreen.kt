@@ -171,7 +171,8 @@ fun AddDocumentScreen(memberId: String, docId: String?, onBack: () -> Unit, onSa
                     style = fdText(11.5f, color = c.muted))
             }
             FdChips(Modifier.padding(start = 20.dp, end = 20.dp, top = 10.dp)) {
-                DocTypes.SUGGESTIONS.forEach { s -> FdChip(s, vm.name.equals(s, true), { vm.onNameChange(s) }) }
+                // for an event: tickets, bookings, passes…; otherwise the usual ID documents
+                (if (vm.forEvent) DocTypes.EVENT_SUGGESTIONS else DocTypes.SUGGESTIONS).forEach { s -> FdChip(s, vm.name.equals(s, true), { vm.onNameChange(s) }) }
             }
 
             // ---------- Issued by ----------

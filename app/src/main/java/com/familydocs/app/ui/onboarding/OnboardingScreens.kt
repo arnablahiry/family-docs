@@ -216,10 +216,11 @@ fun RegisterScreen(vm: OnboardingViewModel, onBack: () -> Unit, title: String = 
             // ---- your group: start one (e.g. your family) or join one with its code ----
             if (!vm.editing) FdField("Your group", error = e["group"],
                 hint = if (vm.groupMode == "create") "Everyone in it shares its people, Common vault and events. It gets its own code."
-                       else "Groups saved in this Google account's backup come back with their documents.") {
-                FdSegmented(listOf(Triple("create", "plus", "Create a group"), Triple("join", "key", "Join with code")), vm.groupMode) { vm.groupMode = it }
+                       else "Paste the invite someone in the group sent you, or a code from your own Google backup.") {
+                FdSegmented(listOf(Triple("create", "plus", "Create a group"), Triple("join", "key", "Join a group")), vm.groupMode) { vm.groupMode = it }
                 if (vm.groupMode == "create") FdInput(vm.groupName, { vm.groupName = it }, Modifier.padding(top = 10.dp), placeholder = "Group name, e.g. Family")
-                else FdInput(vm.groupCode, { vm.groupCode = it }, Modifier.padding(top = 10.dp), placeholder = "Group code, e.g. K7#-Q2@-XM4")
+                else FdInput(vm.groupCode, { vm.groupCode = it }, Modifier.padding(top = 10.dp), placeholder = "Invite (FD1.…) or group code",
+                    singleLine = false)
             }
 
             FdField("Countries you keep documents for", error = e["countries"],

@@ -39,6 +39,8 @@ sealed interface OcrState {
 
 class AddDocumentViewModel(private val c: AppContainer, private val appContext: Context, private val memberId: String, private val docId: String?, private val eventId: String? = null) : ViewModel() {
     var name by mutableStateOf("")
+    /** Added to an event (tickets, hotel bookings, passes…): offers those document types. */
+    val forEvent: Boolean get() = eventId != null || existing?.eventId != null
     var display by mutableStateOf(DisplayMode.ICON)
     /** Front, back, more pages… in order; swipe through them on the edit and view screens. */
     val attachments = mutableStateListOf<EditAttachment>()

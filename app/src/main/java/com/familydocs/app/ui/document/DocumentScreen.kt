@@ -91,9 +91,12 @@ fun DocumentScreen(docId: String, onBack: () -> Unit, onEdit: (memberId: String)
     }
     // Only the details that have a value.
     val filled = d.fields.filter { it.value.isNotBlank() }
+    // Shared by another member of the group: read-only here (they edit it on their phone).
+    val groups by app.repo.groups.collectAsStateWithLifecycle(emptyList())
+    val sharedBy = d.origin?.let { o -> groups.flatMap { it.peerList }.firstOrNull { it.key == o }?.name ?: "another member" }
 
     Column(Modifier.fillMaxSize().background(c.bg).statusBarsPadding()) {
-        FdTopBar("", onBack) { FdIconButton("edit", { onEdit(d.memberId) }, iconSize = 20.dp, description = "Edit document") }
+        FdTopBar("", onBack) { if (sharedBy == null) FdIconButton("edit", { onEdit(d.memberId) }, iconSize = 20.dp, description = "Edit document") }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).navigationBarsPadding()) {
             // `.dhead`
             Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -134,11 +137,12 @@ fun DocumentScreen(docId: String, onBack: () -> Unit, onEdit: (memberId: String)
             }
             // `.meta`
             Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                FdIcon(if (d.readByOcr) "sparkle" else "edit", 14.dp, tint = c.muted)
-                Text("Added ${fmtDate(d.createdAt)} · ${if (d.readByOcr) "details read from the file" else "entered by hand"}", style = fdText(11.5f, color = c.muted))
+                FdIcon(if (sharedBy != null) "people" else if (d.readByOcr) "sparkle" else "edit", 14.dp, tint = c.muted)
+                Text(if (sharedBy != null) "Shared by $sharedBy · read-only here, they keep it up to date"
+                     else "Added ${fmtDate(d.createdAt)} · ${if (d.readByOcr) "details read from the file" else "entered by hand"}", style = fdText(11.5f, color = c.muted))
             }
             // `.actions`
-            Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 24.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (sharedBy == null) Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 24.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 FdButton("Edit", { onEdit(d.memberId) }, Modifier.weight(1f), BtnKind.Ghost, icon = "edit")
                 FdButton("Delete", { confirmDelete = true }, Modifier.weight(1f), BtnKind.Ghost, icon = "trash", contentColor = c.danger)
             }

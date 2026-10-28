@@ -16,6 +16,8 @@ class FileStore(context: Context, private val crypto: CryptoManager) {
 
     fun get(id: String): ByteArray? = File(dir, id).takeIf { it.exists() }?.let { crypto.decrypt(it.readBytes()) }
 
+    fun has(id: String): Boolean = File(dir, id).exists()
+
     fun delete(id: String?) { if (id != null) File(dir, id).delete() }
 
     fun clear() { dir.listFiles()?.forEach { it.delete() } }

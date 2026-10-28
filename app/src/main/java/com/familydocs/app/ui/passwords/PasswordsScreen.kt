@@ -74,7 +74,11 @@ fun PasswordsScreen(memberId: String, onBack: () -> Unit) {
                         PwRow(p, i == 0, p.id in revealed,
                             onReveal = { revealed = if (p.id in revealed) revealed - p.id else revealed + p.id },
                             onCopy = { copySensitive(context, p.site, p.password); toast.show("Copied") },
-                            onDelete = { scope.launch { app.repo.deletePassword(p.id); toast.show("Deleted ${p.site}") } })
+                            onDelete = {
+                                // shared by another member of the group: only they can remove it
+                                if (p.origin != null) toast.show("Shared by another member of the group: they can remove it on their phone")
+                                else scope.launch { app.repo.deletePassword(p.id); toast.show("Deleted ${p.site}") }
+                            })
                     }
                 }
                 Spacer(Modifier.height(100.dp))

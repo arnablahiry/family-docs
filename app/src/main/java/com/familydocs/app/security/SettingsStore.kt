@@ -21,6 +21,8 @@ data class Settings(
     val viewableCopies: Boolean = false,
     /** The preset family (Mom, Sister…) was offered once on this phone. */
     val familyPresetDone: Boolean = false,
+    /** The "backups & sharing" note for your first group has been shown. */
+    val groupIntroDone: Boolean = false,
     /** The group shown on Home (id); null = the first one. */
     val currentGroup: String? = null,
 )
@@ -41,6 +43,7 @@ class SettingsStore(context: Context) {
         theme = runCatching { ThemeMode.valueOf(prefs.getString("theme", "SYSTEM")!!) }.getOrDefault(ThemeMode.SYSTEM),
         viewableCopies = prefs.getBoolean("viewable_copies", false),
         familyPresetDone = prefs.getBoolean("family_preset", false),
+        groupIntroDone = prefs.getBoolean("group_intro", false),
         currentGroup = prefs.getString("group", null),
     )
 
@@ -48,7 +51,7 @@ class SettingsStore(context: Context) {
         val s = block(_state.value)
         prefs.edit()
             .putBoolean("biometric", s.biometric).putLong("autolock", s.autoLockMs).putBoolean("shots", s.blockScreenshots)
-            .putBoolean("backup", s.backupEnabled).putLong("last_backup", s.lastBackup).putString("view", s.vaultView.name).putString("theme", s.theme.name).putBoolean("viewable_copies", s.viewableCopies).putBoolean("family_preset", s.familyPresetDone).putString("group", s.currentGroup)
+            .putBoolean("backup", s.backupEnabled).putLong("last_backup", s.lastBackup).putString("view", s.vaultView.name).putString("theme", s.theme.name).putBoolean("viewable_copies", s.viewableCopies).putBoolean("family_preset", s.familyPresetDone).putBoolean("group_intro", s.groupIntroDone).putString("group", s.currentGroup)
             .apply()
         _state.value = s
     }

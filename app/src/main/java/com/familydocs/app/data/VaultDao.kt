@@ -28,6 +28,13 @@ interface VaultDao {
     @Query("SELECT * FROM vault_groups ORDER BY createdAt") suspend fun groupsNow(): List<GroupEntity>
     @Upsert suspend fun upsertGroup(g: GroupEntity)
     @Query("DELETE FROM vault_groups") suspend fun clearGroups()
+    @Query("SELECT * FROM vault_groups WHERE id = :id") suspend fun groupNow(id: String): GroupEntity?
+    @Query("SELECT * FROM vault_groups WHERE id = :id") fun group(id: String): Flow<GroupEntity?>
+
+    // ---- what other accounts share with you (read-only here) ----
+    @Query("SELECT * FROM members WHERE origin = :key AND groupId IS :g") suspend fun receivedMembers(key: String, g: String): List<MemberEntity>
+    @Query("SELECT * FROM documents WHERE origin = :key AND id LIKE :prefix") suspend fun receivedDocuments(key: String, prefix: String): List<DocumentEntity>
+    @Query("SELECT * FROM passwords WHERE origin = :key AND id LIKE :prefix") suspend fun receivedPasswords(key: String, prefix: String): List<PasswordEntity>
     @Upsert suspend fun upsertMember(m: MemberEntity)
     @Query("DELETE FROM members WHERE id = :id") suspend fun deleteMemberRow(id: String)
     @Query("DELETE FROM documents WHERE memberId = :id") suspend fun deleteDocumentsOf(id: String)

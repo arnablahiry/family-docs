@@ -135,6 +135,11 @@ class DriveClient(private val token: String) {
 
     fun appDataDelete(name: String) { appDataFind(name)?.let { delete(it.id) } }
 
+    /** "Anyone with the link can view": used only for a group's encrypted share files (unreadable without the group code). */
+    fun shareWithLink(id: String) {
+        call(Request.Builder().url("$FILES/$id/permissions?fields=id").post(JSONObject().put("role", "reader").put("type", "anyone").toString().toRequestBody(JSON)))
+    }
+
     fun trash(id: String) { call(Request.Builder().url("$FILES/$id").patch(JSONObject().put("trashed", true).toString().toRequestBody(JSON))) }
 
     companion object {
@@ -143,5 +148,19 @@ class DriveClient(private val token: String) {
         private const val UPLOAD = "https://www.googleapis.com/upload/drive/v3/files"
         private val JSON = "application/json; charset=UTF-8".toMediaType()
         private val OCTET_TYPE = "application/octet-stream".toMediaType()
+        private val plain by lazy { OkHttpClient.Builder().readTimeout(2, TimeUnit.MINUTES).build() }
+
+        /**
+         * Downloads a file someone shared by link (no sign-in needed: it's how you read another member's encrypted share,
+         * which this app can't see through its own Drive access). Fails clearly when the link isn't shared or was removed.
+         */
+        fun publicDownload(id: String): ByteArray {
+            val url = "https://drive.usercontent.google.com/download?id=" + URLEncoder.encode(id, "UTF-8") + "&export=download&confirm=t"
+            return plain.newCall(Request.Builder().url(url).build()).execute().use { r ->
+                val type = r.header("Content-Type").orEmpty()
+                check(r.isSuccessful && !type.startsWith("text/html")) { if (r.code == 404 || type.startsWith("text/html")) "That share isn't available (it may have been removed)" else "Drive ${r.code}" }
+                r.body!!.bytes()
+            }
+        }
     }
 }

@@ -158,8 +158,10 @@ class OnboardingViewModel(private val c: AppContainer) : ViewModel() {
             if (biometric != null) c.settings.update { it.copy(biometric = biometric) }
             c.appLock.unlock(); busy = false; onDone(); return@launch
         }
+        // Joining with an invite someone sent: the group is theirs (read from their encrypted share), set up after the account.
+        val invite = if (!editing && groupMode == "join") com.familydocs.app.domain.GroupInvite.find(groupCode) else null
         // Joining with a code: the group (and its documents) comes from this Google account's backup.
-        if (!editing && groupMode == "join") {
+        if (!editing && groupMode == "join" && invite == null) {
             val s = session
             val err = when {
                 s == null -> "Connect your Google account first"
@@ -173,11 +175,13 @@ class OnboardingViewModel(private val c: AppContainer) : ViewModel() {
             c.setBackups(true)
             c.appLock.unlock(); busy = false; onDone(); return@launch
         }
-        if (!editing) c.selectGroup(c.repo.createGroup(groupName.ifBlank { "Family" }).id)
+        if (!editing) c.selectGroup(invite?.groupId ?: c.repo.createGroup(groupName.ifBlank { "Family" }).id)
         val bytes = picked?.let { bmp -> withContext(Dispatchers.Default) { Images.jpeg(cropToSquare(bmp, crop, cropBoxPx)) } }
         if (!editing && !avatarChosen) com.familydocs.app.data.presetFor(name)?.let { avatar = it.avatar }
         c.repo.saveAccount(name.trim(), countryCode, phone.trim(), email.trim(), bytes, googleLinked, countries,
             removePhoto = removePhoto && bytes == null, avatar = avatar)
+        // (if it can't be read right now, the group is still added and the next sync tries again)
+        if (invite != null) runCatching { c.share.accept(session?.token, invite) }
         pendingPasscode?.let { code -> withContext(Dispatchers.Default) { c.passcode.set(code) } }
         if (biometric != null) c.settings.update { it.copy(biometric = biometric) }
         if (!editing && googleLinked) c.setBackups(true, now = true) // first backup straight away
