@@ -23,6 +23,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -151,16 +156,34 @@ fun DocumentScreen(docId: String, onBack: () -> Unit, onEdit: (memberId: String)
 
     // `.lightbox`
     if (zoomed && pages.isNotEmpty()) Dialog({ zoomed = false }, DialogProperties(usePlatformDefaultWidth = false)) {
+        // All pages (and the gaps between them) zoom and move together, around your fingers; one finger scrolls.
         var scale by remember { mutableFloatStateOf(1f) }
         var offset by remember { mutableStateOf(Offset.Zero) }
-        Box(Modifier.fillMaxSize().background(Color(0xFF05070C)).pointerInput(Unit) {
-            detectTransformGestures { _, pan, z, _ -> scale = (scale * z).coerceIn(1f, 6f); offset = if (scale == 1f) Offset.Zero else offset + pan }
-        }) {
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(10.dp), verticalArrangement = Arrangement.Center) {
-                pages.forEach { p ->
-                    Image(p, null, Modifier.fillMaxWidth().padding(vertical = 4.dp).graphicsLayer { scaleX = scale; scaleY = scale; translationX = offset.x; translationY = offset.y },
-                        contentScale = ContentScale.FillWidth)
-                }
+        var viewport by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+        var contentH by remember { mutableIntStateOf(0) }
+        fun clamp(o: Offset, sc: Float): Offset {
+            val w = viewport.width.toFloat(); val h = viewport.height.toFloat(); val ch = contentH * sc
+            val x = o.x.coerceIn(minOf(0f, w - w * sc), 0f)
+            val y = if (ch <= h) (h - ch) / 2 else o.y.coerceIn(h - ch, 0f)
+            return Offset(x, y)
+        }
+        fun zoomAround(focus: Offset, newScale: Float, pan: Offset = Offset.Zero) {
+            val ns = newScale.coerceIn(1f, 6f)
+            offset = clamp((offset - focus) * (ns / scale) + focus + pan, ns)
+            scale = ns
+        }
+        Box(Modifier.fillMaxSize().background(Color(0xFF05070C)).onSizeChanged { viewport = it; offset = clamp(offset, scale) }
+            .pointerInput(Unit) { detectTransformGestures { centroid, pan, z, _ -> zoomAround(centroid, scale * z, pan) } }
+            .pointerInput(Unit) { detectTapGestures(onDoubleTap = { p -> zoomAround(p, if (scale > 1.2f) 1f else 2.5f) }) }
+        ) {
+            Column(
+                Modifier.fillMaxWidth().wrapContentHeight(Alignment.Top, unbounded = true)
+                    .onSizeChanged { contentH = it.height; offset = clamp(offset, scale) }
+                    .graphicsLayer { transformOrigin = TransformOrigin(0f, 0f); scaleX = scale; scaleY = scale; translationX = offset.x; translationY = offset.y }
+                    .padding(horizontal = 10.dp, vertical = 64.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                pages.forEach { p -> Image(p, null, Modifier.fillMaxWidth(), contentScale = ContentScale.FillWidth) }
             }
             Row(Modifier.statusBarsPadding().padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 FdIconButton("close", { zoomed = false }, tint = Color.White, description = "Close")

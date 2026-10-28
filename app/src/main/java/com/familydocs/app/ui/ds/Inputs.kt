@@ -72,6 +72,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.familydocs.app.domain.Countries
 import kotlin.math.max
+import kotlin.math.roundToInt
 
 // ---------------- passcode ----------------
 
@@ -167,39 +168,55 @@ private fun Key(label: String, onClick: () -> Unit, flat: Boolean = false, conte
 
 class CropState { var zoom by mutableStateOf(1f); var pan by mutableStateOf(Offset.Zero) }
 
+/** Diameter of the crop circle; the photo is fitted to cover it, and that circle is what gets saved. */
+private val CROP_CIRCLE = 200.dp
+
 /**
- * 180px circle you drag the photo around in, plus the zoom slider underneath (as in the demo).
- * Panning is clamped so the circle is always filled. [placeholder] shows when there is no photo.
+ * Photo cropper: the whole photo shows in a rounded square, dimmed outside the crop circle, so you can see what's cut
+ * off; drag to position it, pinch or use the slider to zoom. Panning is clamped so the circle is always filled.
+ * [placeholder] shows (in the circle) when there is no photo.
  */
 @Composable
 fun FdPhotoCropper(bitmap: Bitmap?, state: CropState, placeholder: @Composable () -> Unit) {
     val c = Fd.c
-    val boxDp = 180.dp
-    val boxPx = with(LocalDensity.current) { (boxDp - 6.dp).toPx() } // the photo area inside the border/padding
+    val circlePx = with(LocalDensity.current) { CROP_CIRCLE.toPx() }
+    val ring = with(LocalDensity.current) { 2.dp.toPx() }
+    val image = remember(bitmap) { bitmap?.asImageBitmap() }
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+        if (image == null || bitmap == null) {
+            Box(Modifier.size(CROP_CIRCLE).border(1.5.dp, c.line, CircleShape).padding(3.dp).clip(CircleShape).background(c.surface2), contentAlignment = Alignment.Center) { placeholder() }
+            return@Column
+        }
         Box(
-            Modifier.size(boxDp).border(1.5.dp, c.line, CircleShape).padding(3.dp).clip(CircleShape).background(c.surface2)
-                .then(if (bitmap == null) Modifier else Modifier.pointerInput(bitmap) {
+            Modifier.size(CROP_CIRCLE + 70.dp).clip(RoundedCornerShape(28.dp)).background(c.surface2)
+                .pointerInput(bitmap) {
                     awaitEachGesture {
                         awaitFirstDown(requireUnconsumed = false)
                         do {
                             val e = awaitPointerEvent()
-                            state.zoom = (state.zoom * e.calculateZoom()).coerceIn(1f, 3f)
-                            state.pan = clampPan(state.pan + e.calculatePan(), bitmap, boxPx, state.zoom)
+                            state.zoom = (state.zoom * e.calculateZoom()).coerceIn(1f, 4f)
+                            state.pan = clampPan(state.pan + e.calculatePan(), bitmap, circlePx, state.zoom)
                             e.changes.forEach { if (it.positionChanged()) it.consume() } // keeps the page from scrolling while you drag
                         } while (e.changes.any { it.pressed })
                     }
-                }),
-            contentAlignment = Alignment.Center,
+                },
         ) {
-            if (bitmap != null) Image(bitmap.asImageBitmap(), "Photo", contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize().graphicsLayer { scaleX = state.zoom; scaleY = state.zoom; translationX = state.pan.x; translationY = state.pan.y })
-            else placeholder()
+            androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+                val base = max(circlePx / image.width, circlePx / image.height)
+                val w = image.width * base * state.zoom; val h = image.height * base * state.zoom
+                val left = size.width / 2 + state.pan.x - w / 2; val top = size.height / 2 + state.pan.y - h / 2
+                drawImage(image, dstOffset = androidx.compose.ui.unit.IntOffset(left.roundToInt(), top.roundToInt()),
+                    dstSize = androidx.compose.ui.unit.IntSize(w.roundToInt(), h.roundToInt()), filterQuality = androidx.compose.ui.graphics.FilterQuality.Medium)
+                // dim everything outside the circle, then the circle's rim
+                val hole = androidx.compose.ui.graphics.Path().apply { addOval(androidx.compose.ui.geometry.Rect(center, circlePx / 2)) }
+                androidx.compose.ui.graphics.drawscope.clipPath(hole, androidx.compose.ui.graphics.ClipOp.Difference) { drawRect(Color(0x8C0A0F1E)) }
+                drawCircle(Color.White.copy(alpha = .92f), circlePx / 2, center, style = androidx.compose.ui.graphics.drawscope.Stroke(ring))
+            }
         }
-        if (bitmap != null) Column(Modifier.fillMaxWidth()) {
-            Text("Zoom · drag the photo to position it", style = fdText(12f, FontWeight.Medium, c.muted))
+        Column(Modifier.fillMaxWidth()) {
+            Text("Drag to position · pinch or slide to zoom", style = fdText(12f, FontWeight.Medium, c.muted))
             Slider(
-                value = state.zoom, onValueChange = { state.zoom = it; state.pan = clampPan(state.pan, bitmap, boxPx, it) }, valueRange = 1f..3f,
+                value = state.zoom, onValueChange = { state.zoom = it; state.pan = clampPan(state.pan, bitmap, circlePx, it) }, valueRange = 1f..4f,
                 colors = SliderDefaults.colors(thumbColor = c.primary, activeTrackColor = c.primary, inactiveTrackColor = c.line),
             )
         }
@@ -224,9 +241,9 @@ fun cropToSquare(src: Bitmap, state: CropState, boxPx: Float, out: Int = 512): B
     }
 }
 
-/** Crop box size in px for [cropToSquare] (the visible circle inside the 3dp padding). */
+/** Crop circle size in px for [cropToSquare] (what the circle shows is what's saved). */
 @Composable
-fun cropBoxPx(): Float = with(LocalDensity.current) { (180.dp - 6.dp).toPx() }
+fun cropBoxPx(): Float = with(LocalDensity.current) { CROP_CIRCLE.toPx() }
 
 /** Row of the illustrated characters; tap one to use it as the default picture. */
 @Composable
