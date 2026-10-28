@@ -95,6 +95,23 @@ fun GroupSettingsSheet(groupId: String, intro: String? = null, joinedFrom: Strin
     var pasteError by remember { mutableStateOf<String?>(null) }
     var forgetting by remember { mutableStateOf<String?>(null) }
     val sendInvite = rememberInviteSender { busy = if (it) "Preparing the invite…" else null }
+    // Requests to join with the code (when the app was built with the request server)
+    val incoming by app.requests.incoming.collectAsStateWithLifecycle()
+    val waiting = incoming[g.id].orEmpty()
+    var approving by remember { mutableStateOf<com.familydocs.app.backup.JoinRequests.Incoming?>(null) }
+    androidx.compose.runtime.LaunchedEffect(g.id) { if (app.requests.enabled) runCatching { app.requests.checkGroups() } }
+    val approve = rememberGoogleConnect { r ->
+        val req = approving ?: return@rememberGoogleConnect
+        r.onSuccess { s ->
+            scope.launch {
+                busy = "Letting ${req.name} in…"
+                runCatching { app.requests.approve(s.token, g, req) }
+                    .onSuccess { toast.show("${req.name} can join now. Their documents appear once their phone confirms.") }
+                    .onFailure { toast.show("Couldn't approve: ${it.message}") }
+                busy = null; approving = null
+            }
+        }.onFailure { approving = null; if (it !is GoogleAccountHelper.Cancelled) toast.show(GoogleAccountHelper.explain(it)) }
+    }
     val sync = rememberGoogleConnect { r ->
         r.onSuccess { s ->
             scope.launch {
@@ -130,6 +147,26 @@ fun GroupSettingsSheet(groupId: String, intro: String? = null, joinedFrom: Strin
                  else "Your documents and the Common vault (with its logins). The others back up their own from their phones.",
                 style = fdText(12.5f, color = c.muted), modifier = Modifier.padding(top = 8.dp, bottom = 18.dp))
 
+            // ---- requests ----
+            if (waiting.isNotEmpty()) {
+                Label("Asking to join")
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).border(1.dp, c.line, RoundedCornerShape(16.dp)).padding(vertical = 2.dp)) {
+                    waiting.forEach { r ->
+                        Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 8.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Column(Modifier.weight(1f)) {
+                                Text(r.name, style = fdText(14.5f, FontWeight.Medium))
+                                Text(if (r.at > 0) "Asked " + android.text.format.DateUtils.getRelativeTimeSpanString(r.at) else "Asked with the group code", style = fdText(12f, color = c.muted))
+                            }
+                            com.familydocs.app.ui.ds.FdTextButton("Decline", { scope.launch { runCatching { app.requests.decline(g, r) }.onFailure { toast.show("Couldn't decline: ${it.message}") } } },
+                                enabled = busy == null, color = c.muted)
+                            com.familydocs.app.ui.ds.FdTextButton("Approve", { approving = r; approve() }, enabled = busy == null)
+                        }
+                    }
+                }
+                Spacer(Modifier.height(18.dp))
+            }
+
             // ---- sharing ----
             Label("Shared with")
             val peers = g.peerList
@@ -156,7 +193,7 @@ fun GroupSettingsSheet(groupId: String, intro: String? = null, joinedFrom: Strin
                 FdButton("Add", {
                     val inv = GroupInvite.find(pasted)
                     when {
-                        inv == null -> pasteError = "That isn't a Family Docs invite. Paste the whole message they sent."
+                        inv == null -> pasteError = "That isn't a Lararium invite. Paste the whole message they sent."
                         inv.groupId != g.id -> pasteError = "That invite is for another group (${inv.name}). Use Join group for it."
                         else -> scope.launch {
                             busy = "Reading ${inv.fromName}'s share…"
@@ -190,4 +227,76 @@ fun GroupSettingsSheet(groupId: String, intro: String? = null, joinedFrom: Strin
 @Composable
 private fun Label(text: String) {
     Text(text.uppercase(), style = fdText(11f, FontWeight.SemiBold, Fd.c.muted, spacing = .08f), modifier = Modifier.padding(bottom = 8.dp))
+}
+
+
+/**
+ * Join a group: paste an invite, or type a code. A code for a group that isn't on this phone can ask the group's members
+ * for access (when the app was built with the request server); they approve in their app and you join automatically.
+ */
+@Composable
+fun JoinGroupSheet(onJoined: (groupId: String, invitedBy: String?) -> Unit, onDismiss: () -> Unit) {
+    val app = LocalContainer.current
+    val c = Fd.c
+    val scope = rememberCoroutineScope()
+    var text by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    var found by remember { mutableStateOf<String?>(null) }   // name of the group the code belongs to
+    var sent by remember { mutableStateOf(false) }
+    FdSheet(onDismiss) {
+        SheetTitle("Join a group", if (app.requests.enabled) "Paste the invite someone sent you, or enter the group's code to ask its members for access."
+            else "Paste the invite someone in the group sent you. (A code alone opens groups that are already on this phone.)")
+        if (sent) {
+            FdBanner("check", "Request sent to ${found}. Everyone in it gets a notification; as soon as someone approves, you join automatically and get a notification too.")
+            Spacer(Modifier.height(14.dp))
+            FdButton("Done", onDismiss)
+            Spacer(Modifier.height(12.dp))
+            return@FdSheet
+        }
+        FdInput(text, { text = it; error = null; found = null }, placeholder = "Invite (FD1.…) or group code, e.g. K7#-Q2@-XM4", singleLine = false, error = error != null)
+        error?.let { Text(it, style = fdText(12.5f, color = c.danger), modifier = Modifier.padding(top = 8.dp)) }
+        val f = found
+        if (f != null) {
+            Row(Modifier.padding(top = 12.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp)).border(1.dp, c.line, RoundedCornerShape(16.dp)).padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                FdIcon("people", 20.dp, tint = c.accent)
+                Column(Modifier.weight(1f)) {
+                    Text(f, style = fdText(15f, FontWeight.SemiBold))
+                    Text("Its members decide whether to let you in", style = fdText(12f, color = c.muted))
+                }
+            }
+            FdButton(if (busy) "Sending…" else "Request access", {
+                scope.launch {
+                    busy = true
+                    runCatching { app.requests.request(text, f, app.repo.accountNow()?.name ?: "Someone") }
+                        .onSuccess { sent = true; com.familydocs.app.backup.BackupWorker.scheduleChecks(app.appContext) }
+                        .onFailure { error = "Couldn't send the request: ${it.message}" }
+                    busy = false
+                }
+            }, Modifier.padding(top = 12.dp), enabled = !busy)
+        } else FdButton(if (busy) "One moment…" else "Join", {
+            scope.launch {
+                busy = true
+                val inv = GroupInvite.find(text)
+                if (inv != null) {
+                    runCatching { app.share.accept(null, inv) }.onSuccess { (g, problem) ->
+                        if (problem != null) com.familydocs.app.backup.BackupWorker.syncShares(app.appContext)
+                        onJoined(g.id, inv.fromName); onDismiss()
+                    }.onFailure { error = it.message ?: "Couldn't use that invite" }
+                } else {
+                    val local = app.repo.groupByCode(text)
+                    when {
+                        local != null -> { onJoined(local.id, null); onDismiss() }
+                        app.requests.enabled -> runCatching { app.requests.find(text) }
+                            .onSuccess { name -> if (name != null) found = name else error = "No group with this code. Check it with someone in the group, or ask them for an invite." }
+                            .onFailure { error = "Couldn't look up the code: ${it.message}" }
+                        else -> error = "No group with this code on this phone. To join someone else's group, ask them for an invite (Group settings › Invite someone) and paste the whole message here."
+                    }
+                }
+                busy = false
+            }
+        }, Modifier.padding(top = 14.dp), enabled = text.isNotBlank() && !busy)
+        Spacer(Modifier.height(12.dp))
+    }
 }

@@ -25,7 +25,7 @@ data class GroupInvite(
         .put("i", index).put("k", from).put("m", fromName).toString().toByteArray())
 
     /** What gets sent through WhatsApp, Messages…: a sentence for the person and the invite itself. */
-    fun message(): String = "$fromName invited you to the group \"$name\" in Family Docs. In the app: Join group → paste this whole message.\n\n${encode()}"
+    fun message(): String = "$fromName invited you to the group \"$name\" in Lararium. In the app: Join group → paste this whole message.\n\n${encode()}"
 
     companion object {
         const val PREFIX = "FD1."

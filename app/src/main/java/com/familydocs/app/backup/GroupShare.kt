@@ -23,7 +23,7 @@ import org.json.JSONObject
  * Sharing a group between accounts, with no server: every member's app keeps an encrypted "share" in its own Drive
  * and reads the others'.
  *
- *   My Drive › Family Docs › <Group> › Shared with <Group> (encrypted)/
+ *   My Drive › Lararium › <Group> › Shared with <Group> (encrypted)/
  *       index.fdx          ← people, documents, Common logins (JSON), sealed
  *       <file id>.fdx      ← each scan / page / picture, sealed
  *
@@ -98,15 +98,18 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
 
     // ---------------- publishing ----------------
 
+    /** The group's key (from its code and id): seals the shares, and join-request replies only members can read. */
+    fun groupKey(g: GroupEntity) = key(g)
+
     private fun key(g: GroupEntity) = BackupCrypto.deriveKey(GroupCodes.normalize(g.code).toCharArray(), GroupInvite.salt(g.id))
 
     private suspend fun publish(drive: DriveClient, g: GroupEntity, me: MemberEntity): GroupEntity {
         val key = key(g); val salt = GroupInvite.salt(g.id)
         fun seal(b: ByteArray) = BackupCrypto.seal(b, key, salt)
-        val root = drive.folder("Family Docs", null, mapOf(DriveBackup.P_ROOT to "1"))
-        val groupFolder = drive.folder(g.name, root, mapOf(DriveBackup.P_GROUP to g.id), "Family Docs group · its people, Common vault and events")
+        val root = drive.folder("Lararium", null, mapOf(DriveBackup.P_ROOT to "1"))
+        val groupFolder = drive.folder(g.name, root, mapOf(DriveBackup.P_GROUP to g.id), "Lararium group · its people, Common vault and events")
         val folder = drive.folder("Shared with ${g.name} (encrypted)", groupFolder, mapOf(P_SHARE to g.id),
-            "Encrypted copy for the other members of ${g.name}. Only readable in Family Docs with the group's code.")
+            "Encrypted copy for the other members of ${g.name}. Only readable in Lararium with the group's code.")
 
         val all = dao.membersNow()
         val common = all.firstOrNull { it.shared && it.groupId == g.id }

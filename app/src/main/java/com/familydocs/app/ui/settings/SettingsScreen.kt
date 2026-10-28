@@ -232,13 +232,13 @@ fun SettingsScreen(onBack: () -> Unit, onEditAccount: () -> Unit, onChangePassco
             FdSectionTitle("Account")
             FdList {
                 FdListItem("Sign out", "Backs up to Drive, then removes everything from this phone", first = true, icon = "logout", onClick = { if (busy == null) sheet = "signout" })
-                FdListItem("Delete account", "Erases this phone and your Family Docs backup in Drive", leading = { FdLic("trash", c.danger) },
+                FdListItem("Delete account", "Erases this phone and your Lararium backup in Drive", leading = { FdLic("trash", c.danger) },
                     onClick = { if (busy == null) sheet = "delete" })
             }
 
             FdSectionTitle("About")
             FdList {
-                FdListItem("Family Docs ${version.substringBeforeLast('.').ifBlank { version }}",
+                FdListItem("Lararium ${version.substringBeforeLast('.').ifBlank { version }}",
                     "${members.size} people · ${docs.size} documents on this phone", first = true, icon = "info")
                 UpdateRow(app.updater) { app.appLock.expectExternalActivity() }
             }
@@ -249,7 +249,7 @@ fun SettingsScreen(onBack: () -> Unit, onEditAccount: () -> Unit, onChangePassco
     if (showTree) FdSheet({ showTree = false }) {
         SheetTitle("Your Google Drive",
             "Each document gets its own folder, colour-coded by type and labelled with the person, country and expiry, so Drive search finds it. " +
-                "Files marked with a lock are encrypted: only Family Docs, signed in to your Google account, can open them. Only changed documents are uploaded again, and deleted ones go to Drive's bin.")
+                "Files marked with a lock are encrypted: only Lararium, signed in to your Google account, can open them. Only changed documents are uploaded again, and deleted ones go to Drive's bin.")
         DriveTree(app.repo, s.viewableCopies)
     }
 
@@ -258,7 +258,7 @@ fun SettingsScreen(onBack: () -> Unit, onEditAccount: () -> Unit, onChangePassco
         "restore" -> FdConfirmSheet("Replace this phone's vault?", "Everything on this phone is replaced with the backup in $email's Google Drive.", "Restore",
             onConfirm = { sheet = null; drive(DriveAction.Restore) }, onDismiss = { sheet = null }, danger = false)
         "signout" -> FdSheet({ sheet = null }) {
-            SheetTitle("Sign out of Family Docs?",
+            SheetTitle("Sign out of Lararium?",
                 "Everything is backed up to $email first. Then your family, documents, passwords and passcode are removed from this phone. " +
                     "Sign in with the same Google account to get it all back, here or on a new phone.")
             FdButton("Back up and sign out", { sheet = null; drive(DriveAction.SignOut) }, icon = "logout")
@@ -276,7 +276,7 @@ fun SettingsScreen(onBack: () -> Unit, onEditAccount: () -> Unit, onChangePassco
         "delete" -> FdSheet({ sheet = null }) {
             var typed by remember { mutableStateOf("") }
             SheetTitle("Delete your account?",
-                "This permanently deletes the Family Docs folder and backup key from $email's Google Drive, and everything Family Docs keeps on this phone. It can't be undone.")
+                "This permanently deletes the Lararium folder and backup key from $email's Google Drive, and everything Lararium keeps on this phone. It can't be undone.")
             FdField("Type DELETE to confirm") { FdInput(typed, { typed = it.uppercase() }, placeholder = "DELETE") }
             Spacer(Modifier.height(14.dp))
             FdButton("Delete everything", { sheet = null; drive(DriveAction.Delete) }, kind = BtnKind.Danger, icon = "trash", enabled = typed.trim() == "DELETE")
@@ -325,8 +325,8 @@ private fun DriveTree(repo: VaultRepository, viewable: Boolean) {
             val s = repo.snapshot()
             buildList {
                 add(TreeRow(0, Color(0xFF8F8F94), "My Drive", ""))
-                add(TreeRow(1, Color(0xFFE3962E), "Family Docs", ""))
-                add(TreeRow(2, null, "Family Docs vault.fdenc", "index"))
+                add(TreeRow(1, Color(0xFFE3962E), "Lararium", ""))
+                add(TreeRow(2, null, "Lararium vault.fdenc", "index"))
                 s.members.forEach { m ->
                     add(TreeRow(2, if (m.shared) Color(0xFFE3962E) else Color(0xFF5E7BB0), if (m.shared) "${m.name} (shared)" else m.name, if (m.shared) "everyone" else m.relation))
                     add(TreeRow(3, null, "Passwords.fdenc", "${s.passwords.count { it.memberId == m.id }} logins"))
@@ -380,7 +380,7 @@ private fun UpdateRow(updater: com.familydocs.app.update.AppUpdater, beforeLeavi
             val mb = if (st.release.bytes > 0) " (${st.release.bytes / 1_000_000} MB)" else ""
             FdListItem("Update to ${st.release.version}",
                 if (updater.canInstall()) "Download$mb and install · everything on this phone stays"
-                else "First allow Family Docs to install apps (one switch), then tap again",
+                else "First allow Lararium to install apps (one switch), then tap again",
                 icon = "cloud", onClick = { beforeLeavingApp(); scope.launch { updater.downloadAndInstall(st.release) } })
         }
         is com.familydocs.app.update.AppUpdater.State.Downloading ->

@@ -43,7 +43,7 @@ object BackupCrypto {
 
     /** Salt is stored in the clear so a restore can re-derive the key from the password. */
     fun saltOf(sealed: ByteArray): ByteArray {
-        require(sealed.size > 32 && sealed.copyOfRange(0, 4).contentEquals(MAGIC)) { "Not a Family Docs backup" }
+        require(sealed.size > 32 && sealed.copyOfRange(0, 4).contentEquals(MAGIC)) { "Not a Lararium backup" }
         return sealed.copyOfRange(4, 20)
     }
 

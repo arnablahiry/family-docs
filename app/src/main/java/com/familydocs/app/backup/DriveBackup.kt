@@ -27,8 +27,8 @@ import org.json.JSONObject
  * Backup to the user's own Google Drive, laid out so it makes sense when browsed:
  *
  *   My Drive
- *   └─ Family Docs/                              ← root (label fd_root)
- *      ├─ Family Docs vault.fdenc                ← index: account, people, document list
+ *   └─ Lararium/                              ← root (label fd_root)
+ *      ├─ Lararium vault.fdenc                ← index: account, people, document list
  *      ├─ Common (shared)/                       ← one folder per person / the Common vault (label fd_member)
  *      │  ├─ Passwords.fdenc
  *      │  └─ Rental Agreement · Greece/          ← one folder per document (label fd_doc, coloured by type)
@@ -75,13 +75,13 @@ class DriveBackup(
         BackupKeyStore.Key(android.util.Base64.decode(it.getString("key"), android.util.Base64.NO_WRAP), android.util.Base64.decode(it.getString("id"), android.util.Base64.NO_WRAP))
     }
 
-    /** True when this Google account already has a Family Docs backup. */
+    /** True when this Google account already has a Lararium backup. */
     suspend fun hasBackup(accessToken: String): Boolean = withContext(Dispatchers.IO) {
         val drive = DriveClient(accessToken)
         drive.findByProp(P_ROOT, "1") != null && drive.appDataFind(KEY_FILE) != null
     }
 
-    /** Permanently removes the Family Docs folder and the backup key from this Google account's Drive. */
+    /** Permanently removes the Lararium folder and the backup key from this Google account's Drive. */
     suspend fun deleteFromDrive(accessToken: String) = withContext(Dispatchers.IO) {
         forgetManifest()
         val drive = DriveClient(accessToken)
@@ -113,8 +113,8 @@ class DriveBackup(
         fun seal(b: ByteArray) = BackupCrypto.seal(b, key, salt)
         val selfName = s.account?.name ?: "Me"
 
-        onProgress("Preparing Family Docs folder…")
-        val root = drive.folder("Family Docs", null, mapOf(P_ROOT to "1"), "Encrypted backup made by the Family Docs app for $selfName. Open it with the app.")
+        onProgress("Preparing Lararium folder…")
+        val root = drive.folder("Lararium", null, mapOf(P_ROOT to "1"), "Encrypted backup made by the Lararium app for $selfName. Open it with the app.")
         var uploaded = 0; var unchanged = 0; var removed = 0
         val keyId = android.util.Base64.encodeToString(salt, android.util.Base64.NO_WRAP)
         val now = System.currentTimeMillis()
@@ -124,9 +124,9 @@ class DriveBackup(
         /** true when [k] is unchanged since the last backup (and this isn't the weekly full check); remembers [v] either way */
         fun same(k: String, v: String): Boolean { seen[k] = v; return !full && manifest.getString(k, null) == v }
 
-        // My Drive › Family Docs › <your folder> (your documents are in every group) and one folder per group
+        // My Drive › Lararium › <your folder> (your documents are in every group) and one folder per group
         // (Family, Flatmates…) holding that group's people. Existing folders are moved in, not uploaded again.
-        val groupFolders = s.groups.associate { g -> g.id to drive.folder(g.name, root, mapOf(P_GROUP to g.id), "Family Docs group · its people, Common vault and events") }
+        val groupFolders = s.groups.associate { g -> g.id to drive.folder(g.name, root, mapOf(P_GROUP to g.id), "Lararium group · its people, Common vault and events") }
         val memberFolders = mutableMapOf<String, String>()
         s.members.forEach { m ->
             val title = if (m.shared) "${m.name} (shared)" else m.name
@@ -227,7 +227,7 @@ class DriveBackup(
                 .put("all", it.backupAll).put("shareFolder", it.shareFolder ?: JSONObject.NULL).put("shareIndex", it.shareIndex ?: JSONObject.NULL).put("peers", it.peers ?: JSONObject.NULL) }))
             .put("documents", JSONArray(s.documents.map { JSONObject().put("id", it.id).put("member", it.memberId).put("order", it.sortOrder ?: JSONObject.NULL) }))
         val indexText = index.toString()
-        if (!same("index", sha(indexText))) drive.upsertFile(root, "Family Docs vault.fdenc", seal(indexText.toByteArray()), OCTET, mapOf(P_KIND to "index", P_DOC_FILE to "index"),
+        if (!same("index", sha(indexText))) drive.upsertFile(root, "Lararium vault.fdenc", seal(indexText.toByteArray()), OCTET, mapOf(P_KIND to "index", P_DOC_FILE to "index"),
             "Index of people and documents, encrypted", P_DOC_FILE)
         // Events (dates, who's going, who can see them, pinned documents, reminder, notes, photo): one encrypted file.
         // Their tickets/bookings are ordinary documents (with an event id) inside the creator's folder above.
@@ -248,7 +248,7 @@ class DriveBackup(
     /** Rebuilds the vault from Drive using the key in the hidden app folder. Any failure → nothing on the phone changes. */
     suspend fun restore(accessToken: String, onProgress: (String) -> Unit = {}) = withContext(Dispatchers.IO) {
         val drive = DriveClient(accessToken)
-        val root = drive.findByProp(P_ROOT, "1") ?: error("No Family Docs backup found in this Google account")
+        val root = drive.findByProp(P_ROOT, "1") ?: error("No Lararium backup found in this Google account")
         val indexFile = drive.children(root.id).firstOrNull { it.props[P_KIND] == "index" } ?: error("Backup index is missing")
         val k = drive.appDataRead(KEY_FILE)?.let { parseKey(it) } ?: error("This backup's key is missing from Google Drive, so it can't be opened")
         val key = k.key

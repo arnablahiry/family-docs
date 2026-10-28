@@ -40,6 +40,8 @@ class AppContainer(context: Context) {
     val backup: DriveBackup by lazy { DriveBackup(app, repo, files, BackupKeyStore(app, crypto)) }
     /** Groups shared between accounts (encrypted shares in each member's Drive). */
     val share: com.familydocs.app.backup.GroupShare by lazy { com.familydocs.app.backup.GroupShare(app, db.dao(), files) }
+    /** Asking to join a group with just its code; members approve in the app (needs the Firebase settings at build time). */
+    val requests: com.familydocs.app.backup.JoinRequests by lazy { com.familydocs.app.backup.JoinRequests(app, db.dao(), share) }
 
     /** Shows group [id] on Home and remembers it. */
     fun selectGroup(id: String?) { repo.groupId.value = id; settings.update { it.copy(currentGroup = id) } }
@@ -59,7 +61,7 @@ class AppContainer(context: Context) {
         if (on && now) BackupWorker.runNow(app)
     }
 
-    /** Sign out / delete account: forget Google, then remove everything Family Docs keeps on this phone. */
+    /** Sign out / delete account: forget Google, then remove everything Lararium keeps on this phone. */
     suspend fun wipeThisPhone() {
         BackupWorker.schedule(app, false)
         androidx.work.WorkManager.getInstance(app).cancelAllWork() // event reminders too

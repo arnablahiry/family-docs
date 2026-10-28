@@ -1,4 +1,4 @@
-# Family Docs (Android)
+# Lararium (Android)
 
 Private vault for your family's official documents (Aadhaar, PAN, passports, visas, residence permits and anything else) plus per-person passwords. Kotlin + Jetpack Compose, minSdk 26 (Android 8), targetSdk 35.
 
@@ -43,15 +43,53 @@ Everything Google-related goes through one consent screen (Google Identity `Auth
 
 In [Google Cloud Console](https://console.cloud.google.com/):
 
-1. Create a project (e.g. *Family Docs*).
+1. Create a project (e.g. *Lararium*).
 2. **APIs & Services → Library → Google Drive API → Enable.**
-3. **Google Auth Platform → Branding**: app name *Family Docs*, your email as support and developer contact. **Audience**: *External*. While it's in *Testing*, add every family member's Google account under **Test users** (up to 100).
+3. **Google Auth Platform → Branding**: app name *Lararium*, your email as support and developer contact. **Audience**: *External*. While it's in *Testing*, add every family member's Google account under **Test users** (up to 100).
 4. **Data access → Add scopes**: `.../auth/drive.file`, `.../auth/drive.appdata`, `userinfo.email`, `userinfo.profile`, `openid`. All are non-sensitive.
 5. **Clients → Create client → Android**: package `com.familydocs.app`, SHA-1 `20:73:FB:49:3D:04:18:C3:83:16:7A:1F:86:E5:60:A6:AF:B8:AC:03` (the release key). Add a second Android client with your debug SHA-1 if you run from Android Studio.
 
 That's all. The app doesn't need rebuilding afterwards. Google matches the installed app by package name and signature.
 
-**Signing in on a new phone:** *I already have an account → Continue with Google*. The backup key lives in that Google account's hidden Drive app folder (`drive.appdata`, invisible in My Drive and readable only by Family Docs), so no backup password is needed. Trade-off: anyone who can sign in to that Google account *and* install this app could restore the vault, so keep 2-step verification on for the Google account.
+**Signing in on a new phone:** *I already have an account → Continue with Google*. The backup key lives in that Google account's hidden Drive app folder (`drive.appdata`, invisible in My Drive and readable only by Lararium), so no backup password is needed. Trade-off: anyone who can sign in to that Google account *and* install this app could restore the vault, so keep 2-step verification on for the Google account.
+
+## Join requests (asking to join a group with just its code)
+
+Optional. Without it, people join with an invite (Group settings › Invite someone). With it, someone can type a group's
+code in **Join group › Request access**; every member's phone is notified, and any member approves in Group settings.
+
+It uses a free Firebase project as a sealed mailbox (Firestore + anonymous sign-in, Spark plan, no billing). Nothing
+readable is stored there: the group is found by a hash of its code, names are sealed with the code, and the approval
+(the invite) is sealed to the requester's own key, so even someone else with the code can't read it.
+
+1. [console.firebase.google.com](https://console.firebase.google.com) → **Add project** (e.g. `lararium`). Google Analytics: off.
+2. **Build › Authentication › Get started › Sign-in method › Anonymous → Enable**.
+3. **Build › Firestore Database › Create database** (production mode, a location near you).
+4. Firestore › **Rules** → replace everything with the rules below → **Publish**.
+5. Project settings (⚙) → **General**: copy the **Project ID** and the **Web API key**.
+6. GitHub › the repo › Settings › Secrets and variables › Actions → add `FIREBASE_PROJECT_ID` and `FIREBASE_API_KEY`.
+   The next build turns the feature on. (Locally: `lararium.firebaseProject=…` / `lararium.firebaseApiKey=…` in `~/.gradle/gradle.properties`.)
+
+```
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /groups/{lookup} {
+      allow get: if request.auth != null;
+      allow create, update: if request.auth != null && request.resource.data.keys().hasOnly(['n']);
+      match /requests/{id} {
+        allow get, list: if request.auth != null;
+        allow create: if request.auth != null
+          && request.resource.data.keys().hasOnly(['pub', 'who', 'at', 'uid'])
+          && request.resource.data.uid == request.auth.uid;
+        allow update: if request.auth != null
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ok', 'no', 'epk', 'box', 'by', 'back']);
+        allow delete: if request.auth != null && resource.data.uid == request.auth.uid;
+      }
+    }
+  }
+}
+```
 
 ## Font (Abaddon)
 
@@ -73,7 +111,7 @@ All text uses Abaddon v1.2 (light + bold), bundled in `app/src/main/res/font/`, 
 | Vault views | `ui/member/MemberScreen.kt`, `ui/components/DocVisuals.kt` | Cards (stacked wallet: first tap lifts a card and the cards below spring away, second tap opens), List, Icons |
 | Common vault | `data/VaultRepository.kt`, `ui/member` | A shared vault (house icon) created with the account, for rent agreements, bills, home insurance and the Wi-Fi password. It can be renamed but not deleted. See the note below on sharing between phones |
 | Countries | `domain/Country.kt`, `ui/components/Flag.kt`, `ui/components/CountryPicker.kt` | Every ISO country, with the phone's emoji flags. Picked at sign-up (searchable list) and per document under *Issued by* (searchable, your countries first; OCR pre-selects it). Cards show the flag; a vault with documents from more than one country gets show/hide pills |
-| Backup | `backup/DriveBackup.kt`, `backup/DriveClient.kt` | `My Drive › Family Docs › <person> › <document · country>/`, with each document folder colour-coded by type and labelled with Drive appProperties (person, type, country, expiry). Files are AES-256-GCM encrypted with a random key kept on the phone (Keystore) and in the Google account's hidden app folder. Only changed documents are re-uploaded, and deleted ones go to Drive's bin. Viewable unencrypted copies are optional and off by default. Runs weekly on Wi-Fi, or via Back up now. On a new phone: *I already have an account → Continue with Google* |
+| Backup | `backup/DriveBackup.kt`, `backup/DriveClient.kt` | `My Drive › Lararium › <person> › <document · country>/`, with each document folder colour-coded by type and labelled with Drive appProperties (person, type, country, expiry). Files are AES-256-GCM encrypted with a random key kept on the phone (Keystore) and in the Google account's hidden app folder. Only changed documents are re-uploaded, and deleted ones go to Drive's bin. Viewable unencrypted copies are optional and off by default. Runs weekly on Wi-Fi, or via Back up now. On a new phone: *I already have an account → Continue with Google* |
 
 Android's own cloud backup is switched off (`allowBackup=false` plus data-extraction rules). The Keystore key can't leave the phone, so a copy made that way couldn't be decrypted. Use the in-app Drive backup instead.
 

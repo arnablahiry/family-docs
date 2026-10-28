@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Family Docs</string>
+    <string name="app_name">Lararium</string>
     <!-- OAuth 2.0 *Web application* client ID from Google Cloud Console (APIs & Services → Credentials).
          Needed for "Continue with Google" (profile photo + backup email) and passcode recovery. -->
     <string name="google_web_client_id" translatable="false">REPLACE_ME.apps.googleusercontent.com</string>

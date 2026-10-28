@@ -3,6 +3,7 @@
 #   KEYSTORE_BASE64     base64 of familydocs-release.jks
 #   KEYSTORE_PASSWORD   the store/key password from keystore.properties
 #   GOOGLE_WEB_CLIENT_ID  the OAuth web client ID (optional; sign-in/backup need it)
+#   FIREBASE_API_KEY, FIREBASE_PROJECT_ID  optional: in-app join requests (README › Join requests)
 name: Build APK
 on:
   push:
@@ -38,10 +39,14 @@ jobs:
         run: |
           if [ -n "$CLIENT_ID" ]; then sed -i "s/REPLACE_ME.apps.googleusercontent.com/$CLIENT_ID/" app/src/main/res/values/strings.xml; fi
       - name: Test and build
+        env:
+          FB_KEY: ${{ secrets.FIREBASE_API_KEY }}
+          FB_PROJECT: ${{ secrets.FIREBASE_PROJECT_ID }}
         run: |
           VC="${{ github.event.inputs.versionCode }}"; VN="${{ github.event.inputs.versionName }}"
           set -o pipefail
-          ./gradlew --continue testDebugUnitTest assembleRelease ${VC:+-Pfamilydocs.versionCode=$VC} ${VN:+-Pfamilydocs.versionName=$VN} 2>&1 | tee build.log
+          ./gradlew --continue testDebugUnitTest assembleRelease ${VC:+-Pfamilydocs.versionCode=$VC} ${VN:+-Pfamilydocs.versionName=$VN} \
+            ${FB_KEY:+-Plararium.firebaseApiKey=$FB_KEY} ${FB_PROJECT:+-Plararium.firebaseProject=$FB_PROJECT} 2>&1 | tee build.log
       - name: Summarise build errors (shown on the run page, no sign-in needed)
         if: failure()
         run: |
@@ -53,15 +58,15 @@ jobs:
           VN="${{ github.event.inputs.versionName }}"
           if [ -z "$VN" ]; then VN=$(grep '^familydocs.versionName' gradle.properties | cut -d= -f2); fi
           echo "VN=$VN" >> $GITHUB_ENV
-          cp app/build/outputs/apk/release/app-release.apk "FamilyDocs-$VN.apk"
+          cp app/build/outputs/apk/release/app-release.apk "Lararium-$VN.apk"
       - uses: actions/upload-artifact@v4
         with:
-          name: FamilyDocs-release-apk
-          path: FamilyDocs-*.apk
+          name: Lararium-release-apk
+          path: Lararium-*.apk
       - name: Publish as a Release (open this page on the phone to install)
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.VN }}-build${{ github.run_number }}
-          name: Family Docs ${{ env.VN }} (build ${{ github.run_number }})
-          files: FamilyDocs-*.apk
-          body: Signed release APK. On the phone, open this page, download the .apk and tap it. If Family Docs is already installed it updates in place and keeps everything.
+          name: Lararium ${{ env.VN }} (build ${{ github.run_number }})
+          files: Lararium-*.apk
+          body: Signed release APK. On the phone, open this page, download the .apk and tap it. If Lararium is already installed it updates in place and keeps everything.

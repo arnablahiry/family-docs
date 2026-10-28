@@ -73,7 +73,7 @@ fun PasscodeSetupScreen(title: String, onBack: (() -> Unit)?, onComplete: (Strin
         Column(Modifier.weight(1f).fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 12.dp, bottom = 18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Box(Modifier.size(60.dp).clip(RoundedCornerShape(20.dp)).background(c.accentSoft), contentAlignment = Alignment.Center) { FdIcon("lock", 30.dp, tint = c.accent) }
             Text(if (first == null) "Create a passcode" else "Type it once more", style = fdText(20f, FontWeight.SemiBold), modifier = Modifier.padding(top = 16.dp, bottom = 4.dp))
-            Text(sub ?: if (first == null) "You will use it every time you open Family Docs" else "Confirm your new passcode",
+            Text(sub ?: if (first == null) "You will use it every time you open Lararium" else "Confirm your new passcode",
                 style = fdText(13f, color = c.muted), textAlign = TextAlign.Center, modifier = Modifier.heightIn(min = 20.dp))
             if (first == null) Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(4, 6).forEach { n -> FdChip("$n digits", length == n, { length = n; pin = "" }) }
@@ -137,7 +137,7 @@ fun LockScreen(activity: FragmentActivity) {
     }
     fun unlocked() { if (!success) { pin = "1".repeat(len); success = true } }
 
-    fun biometric() = BiometricHelper.authenticate(activity, "Unlock Family Docs", onSuccess = { unlocked() })
+    fun biometric() = BiometricHelper.authenticate(activity, "Unlock Lararium", onSuccess = { unlocked() })
     LaunchedEffect(Unit) { if (bio) biometric() }
     LaunchedEffect(lockedFor > 0) {
         while (lockedFor > 0) { sub = "Too many tries. Wait ${(lockedFor + 999) / 1000} s"; delay(500); lockedFor = app.passcode.lockoutLeft() }

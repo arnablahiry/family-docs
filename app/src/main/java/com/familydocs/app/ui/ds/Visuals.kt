@@ -562,7 +562,7 @@ fun FdWalletStack(
                         // below close up over it (no snap behind them at the end).
                         Modifier.zIndex(if (dragging || d.id == landingId) 1000f else i.toFloat()).then(place).height(cardH).alpha(dim)
                             // scrolling: the cards lean back a little with the motion (a touch less further down)
-                            .graphicsLayer { scaleX = lift; scaleY = lift; if (!dragging) { rotationX = -tilt() * (1f - i * .05f).coerceAtLeast(.7f) /* negative: top edge towards you */; cameraDistance = 7f * density } }
+                            .graphicsLayer { scaleX = lift; scaleY = lift; if (!dragging) { rotationX = -tilt() * (1f - i * .05f).coerceAtLeast(.7f) /* negative: top edge towards you */; cameraDistance = 7f * this.density } }
                             .onGloballyPositioned { if (isOpen) onOpenBounds(it.boundsInRoot()) }
                             // One gesture handler for both (a separate clickable would grab the touch first):
                             // quick tap → lift / open; hold still ~0.4 s → pick up and drag; move straight away → the list scrolls.

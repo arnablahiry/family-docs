@@ -95,6 +95,7 @@ fun FamilyScreen(onMember: (String) -> Unit, onSettings: () -> Unit, onDocument:
     var sheet by remember { mutableStateOf<String?>(null) } // "create" | "join"
     // Group settings (with a short explanation right after creating / joining): group id, intro, who invited you
     var settingsFor by remember { mutableStateOf<Triple<String, String?, String?>?>(null) }
+    LaunchedEffect(Unit) { if (app.requests.enabled) runCatching { app.requests.checkGroups() } }
     // First time on Home with a group you made at sign-up: explain backups and sharing once.
     LaunchedEffect(groups.isNotEmpty()) {
         val first = groups.firstOrNull() ?: return@LaunchedEffect
@@ -106,6 +107,14 @@ fun FamilyScreen(onMember: (String) -> Unit, onSettings: () -> Unit, onDocument:
     Column(Modifier.fillMaxSize().background(c.bg).statusBarsPadding()) {
         GroupHeader(groups, gid, onSettings, onCreate = { sheet = "create" }, onJoin = { sheet = "join" },
             onGroupSettings = { id -> settingsFor = Triple(id, null, null) })
+        // Someone asked to join this group with its code: review in Group settings.
+        val incoming by app.requests.incoming.collectAsStateWithLifecycle()
+        gid?.let { incoming[it] }.orEmpty().takeIf { it.isNotEmpty() }?.let { reqs ->
+            FdBanner("people", if (reqs.size == 1) "${reqs[0].name} asked to join" else "${reqs.size} people asked to join",
+                Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 6.dp)) {
+                com.familydocs.app.ui.ds.FdTextButton("Review", { gid?.let { settingsFor = Triple(it, null, null) } })
+            }
+        }
         // Switching groups: the old page fades back a touch, the new one rises in and settles.
         AnimatedContent(gid, transitionSpec = {
             (fadeIn(tween(280, delayMillis = 90)) + slideInVertically(tween(380, easing = FdEase)) { it / 16 } + scaleIn(tween(380, easing = FdEase), initialScale = .97f)) togetherWith
@@ -115,21 +124,10 @@ fun FamilyScreen(onMember: (String) -> Unit, onSettings: () -> Unit, onDocument:
     when (sheet) {
         "create" -> GroupSheet("New group", "Its own people, Common vault, events and code. You're in every group.", "Group name, e.g. Flatmates", "Create group",
             onDismiss = { sheet = null }) { name -> val g = app.repo.createGroup(name); app.selectGroup(g.id); app.settings.update { it.copy(groupIntroDone = true) }; settingsFor = Triple(g.id, "created", null); null }
-        "join" -> GroupSheet("Join a group", "Paste the invite someone in the group sent you. (A code alone opens groups that are already on this phone.)",
-            "Invite (FD1.…) or group code", "Join", onDismiss = { sheet = null }, multiline = true) { text ->
-            val inv = com.familydocs.app.domain.GroupInvite.find(text)
-            if (inv != null) {
-                runCatching { app.share.accept(null, inv) }.fold({ (g, problem) ->
-                    app.selectGroup(g.id); settingsFor = Triple(g.id, "joined", inv.fromName)
-                    problem?.let { com.familydocs.app.backup.BackupWorker.syncShares(app.appContext) }
-                    null
-                }, { it.message ?: "Couldn't use that invite" })
-            } else {
-                val g = app.repo.groupByCode(text)
-                if (g != null) { app.selectGroup(g.id); null }
-                else "No group with this code on this phone. To join someone else's group, ask them for an invite (Group settings › Invite someone) and paste the whole message here."
-            }
-        }
+        "join" -> JoinGroupSheet(onJoined = { id, from ->
+            app.selectGroup(id)
+            if (from != null) settingsFor = Triple(id, "joined", from)
+        }, onDismiss = { sheet = null })
     }
     settingsFor?.let { (id, intro, from) -> GroupSettingsSheet(id, intro, from) { settingsFor = null } }
 }
@@ -160,7 +158,7 @@ private fun GroupHome(g: String?, onMember: (String) -> Unit, onSettings: () -> 
                 // A newer version on GitHub: a quiet hint; Settings › About downloads and installs it.
                 val update by app.updater.state.collectAsStateWithLifecycle()
                 (update as? com.familydocs.app.update.AppUpdater.State.Available)?.let { a ->
-                    FdBanner("cloud", "Family Docs ${a.release.version} is available", Modifier.padding(top = 12.dp).clickable(onClick = onSettings)) {
+                    FdBanner("cloud", "Lararium ${a.release.version} is available", Modifier.padding(top = 12.dp).clickable(onClick = onSettings)) {
                         Text("Update", style = fdText(12.5f, FontWeight.SemiBold, c.primary))
                     }
                 }
@@ -259,7 +257,7 @@ private fun greeting(): String = when (Calendar.getInstance().get(Calendar.HOUR_
 }
 
 /**
- * Home header: the group's name (always, instead of "Family Docs"), its code underneath (fainter) and a ▾ to switch
+ * Home header: the group's name (always, instead of "Lararium"), its code underneath (fainter) and a ▾ to switch
  * groups (or ＋ to add one when there are none). The name and code roll to the new group; the menu unfolds below.
  */
 @Composable
@@ -280,7 +278,7 @@ private fun GroupHeader(groups: List<com.familydocs.app.data.GroupEntity>, gid: 
             Column(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).clickable { if (groups.isEmpty()) onCreate() else open = !open }
                 .padding(horizontal = 6.dp, vertical = 2.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    AnimatedContent(current?.name ?: "Family Docs", Modifier.weight(1f, fill = false), transitionSpec = {
+                    AnimatedContent(current?.name ?: "Lararium", Modifier.weight(1f, fill = false), transitionSpec = {
                         (slideInVertically(tween(320, easing = FdEase)) { it / 2 } + fadeIn(tween(240, 60))) togetherWith (slideOutVertically(tween(260)) { -it / 2 } + fadeOut(tween(160)))
                     }, label = "groupName") { name -> Text(name, style = fdText(22f, FontWeight.Bold, spacing = .01f), maxLines = 1, overflow = TextOverflow.Ellipsis) }
                     if (groups.isEmpty()) FdIcon("plus", 18.dp, tint = c.muted, description = "Add a group")

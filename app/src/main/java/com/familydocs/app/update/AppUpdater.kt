@@ -19,7 +19,7 @@ import java.net.URL
  * In-app updates from this app's GitHub releases (the CI publishes a signed APK for every push).
  * Checks the latest release, downloads its APK into the app's cache and hands it to Android's installer.
  * Same signing key every release, so the installed app (and all its data) is simply updated.
- * The first time, Android asks once to allow "Install unknown apps" for Family Docs.
+ * The first time, Android asks once to allow "Install unknown apps" for Lararium.
  */
 class AppUpdater(private val context: Context) {
     data class Release(val version: String, val tag: String, val apkUrl: String, val bytes: Long)
@@ -57,7 +57,7 @@ class AppUpdater(private val context: Context) {
         val file = runCatching {
             withContext(Dispatchers.IO) {
                 val dir = File(context.cacheDir, "updates").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
-                val out = File(dir, "FamilyDocs-${r.version}.apk")
+                val out = File(dir, "Lararium-${r.version}.apk")
                 val c = (URL(r.apkUrl).openConnection() as HttpURLConnection).apply { connectTimeout = 15_000; readTimeout = 30_000; instanceFollowRedirects = true }
                 val total = c.contentLengthLong.takeIf { it > 0 } ?: r.bytes
                 c.inputStream.use { input ->
@@ -78,7 +78,7 @@ class AppUpdater(private val context: Context) {
 
     fun canInstall(): Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.O || context.packageManager.canRequestPackageInstalls()
 
-    /** Android's own switch: Settings › Install unknown apps › Family Docs. */
+    /** Android's own switch: Settings › Install unknown apps › Lararium. */
     fun askInstallPermission() {
         context.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }

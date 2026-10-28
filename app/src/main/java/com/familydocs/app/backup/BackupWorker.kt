@@ -22,12 +22,21 @@ class BackupWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
         val shareOnly = inputData.getBoolean(SHARE_ONLY, false)
         val backup = c.settings.value.backupEnabled && !shareOnly
         val sharing = c.repo.groupsNow().any { it.shareIndex != null || it.peerList.isNotEmpty() }
-        if (!backup && !sharing) return Result.success()
+        val asking = c.requests.enabled && (c.requests.pending().isNotEmpty() || c.repo.groupsNow().isNotEmpty())
+        // Join requests for your groups (and answers to yours): checked first, they don't need Google Drive.
+        if (asking) runCatching { c.requests.checkGroups() }.onSuccess { fresh ->
+            fresh.forEach { (g, r) -> GroupNotices.show(applicationContext, "${r.name} asked to join ${g.name}", "Open Group settings to approve or decline", r.id.hashCode()) }
+        }
+        if (!backup && !sharing && !(asking && c.requests.pending().isNotEmpty())) return Result.success()
         val auth = runCatching { c.backup.authorize() }.getOrElse { return Result.retry() }
         if (auth.hasResolution()) return Result.success() // needs the user; Settings shows "Back up now"
         val token = auth.accessToken ?: return Result.retry()
+        // Your own requests: join the groups that approved you (and send your invite back to them).
+        if (asking && c.requests.pending().isNotEmpty()) runCatching { c.requests.checkMine(token) }.onSuccess { msgs ->
+            msgs.forEach { GroupNotices.show(applicationContext, it, "Lararium", it.hashCode()) }
+        }
         // Shared groups: publish your share and read everyone else's (a failure here never fails the backup).
-        if (sharing) runCatching { c.share.sync(token) }
+        if (sharing || asking) runCatching { c.share.sync(token) }
         if (!backup) return Result.success()
         return runCatching { c.backup.backup(token, c.settings.value.viewableCopies) }
             .onSuccess { c.settings.update { s -> s.copy(lastBackup = System.currentTimeMillis()) } }
@@ -37,6 +46,14 @@ class BackupWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
     companion object {
         private const val NAME = "familydocs-drive-backup"
         private const val SHARE_ONLY = "share_only"
+
+        /** Every few hours: join requests and shared groups (only does anything when those are in use). */
+        fun scheduleChecks(context: Context) {
+            val req = PeriodicWorkRequestBuilder<BackupWorker>(3, TimeUnit.HOURS)
+                .setInputData(androidx.work.workDataOf(SHARE_ONLY to true))
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build()
+            WorkManager.getInstance(context).enqueueUniquePeriodicWork("$NAME-checks", ExistingPeriodicWorkPolicy.KEEP, req)
+        }
 
         /** At app start: read what the other members of shared groups changed (and publish yours). */
         fun syncShares(context: Context) {

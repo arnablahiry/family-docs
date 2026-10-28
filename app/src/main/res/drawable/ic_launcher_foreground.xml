@@ -1,11 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Two stacked wallet cards, marigold on ink. 108dp canvas; scaled to 80% and centred so it sits well inside the 66dp safe zone with room around it (round and squircle masks included). -->
+<!-- Lararium: a small Roman shrine (pediment, entablature, two columns, two-step podium) with the wallet cards inside,
+     ink on marigold. 108dp adaptive-icon canvas; the art is centred on its bounding box and kept ~29.5dp from the
+     centre (the safe zone is 33dp), so the padding is even in round, squircle and square masks. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-    <group android:pivotX="54" android:pivotY="54" android:scaleX="0.8" android:scaleY="0.8" android:translateX="1" android:translateY="-2">
-    <path android:fillColor="#7C8BB0" android:pathData="M36,34h40a6,6 0,0 1,6 6v22a6,6 0,0 1,-6 6H36a6,6 0,0 1,-6 -6V40a6,6 0,0 1,6 -6z"/>
-    <path android:fillColor="#E3962E" android:pathData="M30,44h42a6,6 0,0 1,6 6v22a6,6 0,0 1,-6 6H30a6,6 0,0 1,-6 -6V50a6,6 0,0 1,6 -6z"/>
-    <path android:fillColor="#F6D9A6" android:pathData="M32,54h9a2,2 0,0 1,2 2v6a2,2 0,0 1,-2 2h-9a2,2 0,0 1,-2 -2v-6a2,2 0,0 1,2 -2z"/>
-    <path android:fillColor="#1E2F55" android:pathData="M48,66h22v3H48z M48,59h14v3H48z"/>
+    <group android:pivotX="54.000" android:pivotY="56.750" android:scaleX="0.7657" android:scaleY="0.7657" android:translateX="0.000" android:translateY="-2.750">
+        <path android:fillColor="#1E2F55" android:pathData="M28,42L54,30.5L80,42Z"/>
+        <path android:fillColor="#1E2F55" android:pathData="M27.6,42h52.8a0.6,0.6 0,0 1,0.6,0.6v2.0a0.6,0.6 0,0 1,-0.6,0.6h-52.8a0.6,0.6 0,0 1,-0.6,-0.6v-2.0a0.6,0.6 0,0 1,0.6,-0.6z"/>
+        <path android:fillColor="#1E2F55" android:pathData="M30.4,46.4h47.2a0.4,0.4 0,0 1,0.4,0.4v1.4000000000000001a0.4,0.4 0,0 1,-0.4,0.4h-47.2a0.4,0.4 0,0 1,-0.4,-0.4v-1.4000000000000001a0.4,0.4 0,0 1,0.4,-0.4z"/>
+        <path android:fillColor="#1E2F55" android:pathData="M31.7,49.6h6.6000000000000005a0.4,0.4 0,0 1,0.4,0.4v1.2a0.4,0.4 0,0 1,-0.4,0.4h-6.6000000000000005a0.4,0.4 0,0 1,-0.4,-0.4v-1.2a0.4,0.4 0,0 1,0.4,-0.4z"/>
+        <path android:fillColor="#1E2F55" android:pathData="M32.5,51.6h5v22h-5z"/>
+        <path android:fillColor="#1E2F55" android:pathData="M31.7,73.6h6.6000000000000005a0.4,0.4 0,0 1,0.4,0.4v1.2a0.4,0.4 0,0 1,-0.4,0.4h-6.6000000000000005a0.4,0.4 0,0 1,-0.4,-0.4v-1.2a0.4,0.4 0,0 1,0.4,-0.4z"/>
+        <path android:fillColor="#1E2F55" android:pathData="M69.7,49.6h6.6000000000000005a0.4,0.4 0,0 1,0.4,0.4v1.2a0.4,0.4 0,0 1,-0.4,0.4h-6.6000000000000005a0.4,0.4 0,0 1,-0.4,-0.4v-1.2a0.4,0.4 0,0 1,0.4,-0.4z"/>
+        <path android:fillColor="#1E2F55" android:pathData="M70.5,51.6h5v22h-5z"/>
+        <path android:fillColor="#1E2F55" android:pathData="M69.7,73.6h6.6000000000000005a0.4,0.4 0,0 1,0.4,0.4v1.2a0.4,0.4 0,0 1,-0.4,0.4h-6.6000000000000005a0.4,0.4 0,0 1,-0.4,-0.4v-1.2a0.4,0.4 0,0 1,0.4,-0.4z"/>
+        <path android:fillColor="#1E2F55" android:pathData="M29.5,76.6h49.0a0.5,0.5 0,0 1,0.5,0.5v1.6a0.5,0.5 0,0 1,-0.5,0.5h-49.0a0.5,0.5 0,0 1,-0.5,-0.5v-1.6a0.5,0.5 0,0 1,0.5,-0.5z"/>
+        <path android:fillColor="#1E2F55" android:pathData="M26.5,80.2h55.0a0.5,0.5 0,0 1,0.5,0.5v1.7999999999999998a0.5,0.5 0,0 1,-0.5,0.5h-55.0a0.5,0.5 0,0 1,-0.5,-0.5v-1.7999999999999998a0.5,0.5 0,0 1,0.5,-0.5z"/>
+        <path android:fillColor="#B8701F" android:strokeColor="#1E2F55" android:strokeWidth="1.3" android:pathData="M43.400000000000006,53.2h21.200000000000003a2.2,2.2 0,0 1,2.2,2.2v9.2a2.2,2.2 0,0 1,-2.2,2.2h-21.200000000000003a2.2,2.2 0,0 1,-2.2,-2.2v-9.2a2.2,2.2 0,0 1,2.2,-2.2z"/>
+        <path android:fillColor="#F6D9A6" android:strokeColor="#1E2F55" android:strokeWidth="1.4" android:pathData="M42.0,58.4h24.0a2.6,2.6 0,0 1,2.6,2.6v11.400000000000002a2.6,2.6 0,0 1,-2.6,2.6h-24.0a2.6,2.6 0,0 1,-2.6,-2.6v-11.400000000000002a2.6,2.6 0,0 1,2.6,-2.6z"/>
+        <path android:fillColor="#1E2F55" android:pathData="M43.7,62h4.3999999999999995a1.1,1.1 0,0 1,1.1,1.1v3.0a1.1,1.1 0,0 1,-1.1,1.1h-4.3999999999999995a1.1,1.1 0,0 1,-1.1,-1.1v-3.0a1.1,1.1 0,0 1,1.1,-1.1z"/>
+        <path android:fillColor="#1E2F55" android:pathData="M52.800000000000004,68.4h11.4a0.6,0.6 0,0 1,0.6,0.6v0.8a0.6,0.6 0,0 1,-0.6,0.6h-11.4a0.6,0.6 0,0 1,-0.6,-0.6v-0.8a0.6,0.6 0,0 1,0.6,-0.6z"/>
+        <path android:fillColor="#1E2F55" android:pathData="M52.800000000000004,63.6h7.2a0.6,0.6 0,0 1,0.6,0.6v0.8a0.6,0.6 0,0 1,-0.6,0.6h-7.2a0.6,0.6 0,0 1,-0.6,-0.6v-0.8a0.6,0.6 0,0 1,0.6,-0.6z"/>
     </group>
 </vector>

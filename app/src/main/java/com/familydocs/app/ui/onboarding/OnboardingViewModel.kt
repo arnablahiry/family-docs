@@ -119,7 +119,7 @@ class OnboardingViewModel(private val c: AppContainer) : ViewModel() {
         val exists = runCatching { c.backup.hasBackup(s.token) }
         when {
             exists.isFailure -> restoreError = GoogleAccountHelper.explain(exists.exceptionOrNull()!!)
-            exists.getOrNull() != true -> restoreError = "There's no Family Docs backup in ${s.profile.email}. Sign in with another Google account, or create a new account."
+            exists.getOrNull() != true -> restoreError = "There's no Lararium backup in ${s.profile.email}. Sign in with another Google account, or create a new account."
             else -> runCatching { c.backup.restore(s.token) { msg -> restoreStatus = msg } }
                 .onSuccess {
                     restored = true
@@ -165,7 +165,7 @@ class OnboardingViewModel(private val c: AppContainer) : ViewModel() {
             val s = session
             val err = when {
                 s == null -> "Connect your Google account first"
-                runCatching { c.backup.hasBackup(s.token) }.getOrDefault(false).not() -> "There's no Family Docs backup in ${s.profile.email} to join from"
+                runCatching { c.backup.hasBackup(s.token) }.getOrDefault(false).not() -> "There's no Lararium backup in ${s.profile.email} to join from"
                 else -> runCatching { c.backup.restore(s.token) }.exceptionOrNull()?.let { "Couldn't open the backup: ${it.message ?: "unknown error"}" }
                     ?: c.repo.groupByCode(groupCode).let { g -> if (g == null) "No group with this code in ${s.profile.email}'s backup" else { c.selectGroup(g.id); null } }
             }

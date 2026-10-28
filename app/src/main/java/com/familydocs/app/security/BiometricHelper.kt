@@ -14,7 +14,7 @@ object BiometricHelper {
 
     /**
      * Asks for the phone's own screen lock (or a fingerprint enrolled on it): the second check, after Google,
-     * before a forgotten Family Docs passcode can be replaced.
+     * before a forgotten Lararium passcode can be replaced.
      */
     fun confirmDevice(activity: FragmentActivity, onSuccess: () -> Unit, onFail: (String) -> Unit) {
         val allowed = if (android.os.Build.VERSION.SDK_INT >= 30) BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL
@@ -25,7 +25,7 @@ object BiometricHelper {
         }).authenticate(
             BiometricPrompt.PromptInfo.Builder()
                 .setTitle("Confirm it's you")
-                .setSubtitle("Use this phone's screen lock to reset your Family Docs passcode")
+                .setSubtitle("Use this phone's screen lock to reset your Lararium passcode")
                 .setAllowedAuthenticators(allowed)
                 .build(),
         )

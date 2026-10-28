@@ -208,7 +208,7 @@ fun RegisterScreen(vm: OnboardingViewModel, onBack: () -> Unit, title: String = 
                 }
                 else GoogleButton(busy = vm.busy) { vm.googleStarted(); connectGoogle() }
                 vm.message?.let { FdBanner("info", it, Modifier.padding(top = 4.dp)) }
-                if (vm.foundBackup) FdBanner("cloud", "This Google account already has a Family Docs backup.", Modifier.padding(top = 4.dp)) {
+                if (vm.foundBackup) FdBanner("cloud", "This Google account already has a Lararium backup.", Modifier.padding(top = 4.dp)) {
                     FdTextButton("Restore it", onRestoreInstead)
                 }
             }
