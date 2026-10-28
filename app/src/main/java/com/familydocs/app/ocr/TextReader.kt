@@ -13,8 +13,9 @@ class TextReader {
     suspend fun read(pages: List<Bitmap>): String =
         pages.map { recognizer.process(InputImage.fromBitmap(it, 0)).await().text }.joinToString("\n")
 
-    suspend fun readAndParse(pages: List<Bitmap>): Pair<String, DocumentParser.Result> {
+    /** [hint]: the document name typed so far; picks which preset fields to look for. */
+    suspend fun readAndParse(pages: List<Bitmap>, hint: String? = null): Pair<String, DocumentParser.Result> {
         val text = read(pages)
-        return text to DocumentParser.parse(text)
+        return text to DocumentParser.parse(text, hint)
     }
 }

@@ -27,7 +27,7 @@ import com.familydocs.app.R
 
 /** National ID cards: these show the issuing country's flag faintly behind the hills unless the user turns it off
  *  (and any other document can turn it on: DocumentEntity.showFlag). */
-val NATIONAL_CARD_TYPES = setOf("aadhaar", "visa", "residence", "id", "pan", "voter", "social", "tax")
+val NATIONAL_CARD_TYPES = com.familydocs.app.domain.DocTypes.FLAG_TYPES
 private const val FLAG_ALPHA = .13f
 
 /** The flag's tilt for a card: 4–12° either way, fixed per document type + country (same hash as the demo). */

@@ -60,6 +60,9 @@ object DocTypes {
         "insurance" to listOf("Policy No.", "Insurer", "Valid Until"),
         "bank" to listOf("Account No.", "IFSC / IBAN", "Branch"),
         "social" to listOf("Social Security No.", "Name", "Issued On"),
+        "tax" to listOf("Tax No.", "Name"),
+        "id" to listOf("ID No.", "Surname", "Given Names", "Date of Birth", "Valid Until"),
+        "education" to listOf("Degree", "Subject / Field", "Specialisation", "University", "Year of Passing", "Grade"),
         "property" to listOf("Contract No.", "Landlord", "Address", "Monthly Rent", "Valid Until"),
         "bill" to listOf("Account No.", "Provider", "Amount", "Due Date"),
         "other" to listOf("Document No.", "Name", "Issued On", "Valid Until"),
@@ -71,7 +74,10 @@ object DocTypes {
     fun isSensitive(label: String) = SENSITIVE.containsMatchIn(label)
 
     /** National ID cards show the issuing country's flag on their card unless turned off; other documents only when turned on. */
-    fun flagByDefault(name: String) = forName(name).key in com.familydocs.app.ui.ds.NATIONAL_CARD_TYPES
+    fun flagByDefault(name: String) = forName(name).key in FLAG_TYPES
+
+    /** National ID cards: these show the issuing country's flag faintly behind the card art unless turned off. */
+    val FLAG_TYPES = setOf("aadhaar", "visa", "residence", "id", "pan", "voter", "social", "tax")
 
     fun forName(name: String): DocType {
         val n = name.trim()

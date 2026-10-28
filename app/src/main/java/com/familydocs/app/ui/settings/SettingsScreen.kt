@@ -335,10 +335,11 @@ private fun DriveTree(repo: VaultRepository, viewable: Boolean) {
                         val exp = d.fields.firstOrNull { Regex("expiry|valid until", RegexOption.IGNORE_CASE).containsMatchIn(it.label) && it.value.isNotBlank() }?.value
                         add(TreeRow(3, Color(t.hue), d.name + if (ctry.isNotEmpty()) " · ${Countries.name(ctry)}" else "",
                             listOfNotNull(t.label.takeIf { t.matched }, exp?.let { "until $it" }).joinToString(" · ")))
-                        if (d.fileId != null) {
-                            val ext = if (d.fileMime == "application/pdf") "pdf" else "jpg"
-                            add(TreeRow(4, null, "original.$ext.fdenc", ""))
-                            if (viewable) add(TreeRow(4, null, "original.$ext", "viewable", plain = true))
+                        d.attachments.forEachIndexed { n, a ->
+                            val ext = if (a.mime == "application/pdf") "pdf" else "jpg"
+                            val base = if (n == 0) "original" else "page-${n + 1}"
+                            add(TreeRow(4, null, "$base.$ext.fdenc", ""))
+                            if (viewable) add(TreeRow(4, null, "$base.$ext", "viewable", plain = true))
                         }
                         add(TreeRow(4, null, "details.fdenc", "${d.fields.size} fields"))
                     }

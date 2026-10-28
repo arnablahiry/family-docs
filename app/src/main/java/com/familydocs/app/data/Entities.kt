@@ -8,6 +8,18 @@ import com.familydocs.app.domain.DocField
 import org.json.JSONArray
 import org.json.JSONObject
 
+/** One stored file of a document (encrypted in [FileStore]). */
+data class Attachment(val id: String, val mime: String) {
+    companion object {
+        fun encode(list: List<Attachment>): String? = if (list.isEmpty()) null
+            else JSONArray(list.map { JSONObject().put("id", it.id).put("mime", it.mime) }).toString()
+        fun decode(json: String?): List<Attachment> = runCatching {
+            val a = JSONArray(json ?: return emptyList())
+            (0 until a.length()).map { a.getJSONObject(it).let { o -> Attachment(o.getString("id"), o.optString("mime", "image/jpeg")) } }
+        }.getOrDefault(emptyList())
+    }
+}
+
 @Entity(tableName = "account")
 data class AccountEntity(
     @PrimaryKey val id: Int = 1,
@@ -63,7 +75,11 @@ data class DocumentEntity(
     val eventId: String? = null,
     /** Faint country flag behind the card art: null = the type's default (on for national ID cards). Added in database version 4. */
     val showFlag: Boolean? = null,
+    /** Files after the first one ([fileId]), in order: JSON [{"id":…,"mime":…}]. Added in database version 5. */
+    val moreFiles: String? = null,
 ) {
+    /** Every file of the document (front, back, more pages…), in order. */
+    val attachments: List<Attachment> get() = listOfNotNull(fileId?.let { Attachment(it, fileMime ?: "image/jpeg") }) + Attachment.decode(moreFiles)
     val fields: List<DocField> get() = decodeFields(fieldsJson)
     /** Whether the card shows its issuing country's flag. */
     val flagShown: Boolean get() = showFlag ?: com.familydocs.app.domain.DocTypes.flagByDefault(name)

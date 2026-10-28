@@ -7,6 +7,7 @@ import com.google.android.gms.auth.api.identity.Identity
 import com.google.android.gms.common.api.Scope
 import com.familydocs.app.data.AccountEntity
 import com.familydocs.app.data.DisplayMode
+import com.familydocs.app.data.Attachment
 import com.familydocs.app.data.DocumentEntity
 import com.familydocs.app.data.FileStore
 import com.familydocs.app.data.MemberEntity
@@ -124,7 +125,8 @@ class DriveBackup(
             val stamp = d.updatedAt.toString()
             val upToDate = remote.any { it.props[P_KIND] == "details" && it.props[P_UPDATED] == stamp } &&
                 (d.fileId == null || remote.any { it.props[P_KIND] == "original" && it.props[P_UPDATED] == stamp }) &&
-                (!viewableCopies || d.fileId == null || remote.any { it.props[P_KIND] == "plain" && it.props[P_UPDATED] == stamp })
+                (!viewableCopies || d.fileId == null || remote.any { it.props[P_KIND] == "plain" && it.props[P_UPDATED] == stamp }) &&
+                d.attachments.drop(1).indices.all { n -> remote.any { it.props[P_KIND] == "extra" && it.props["n"] == "$n" && it.props[P_UPDATED] == stamp } }
             if (upToDate) { unchanged++; return@forEachIndexed }
 
             val ext = when (d.fileMime) { "application/pdf" -> "pdf"; "image/png" -> "png"; else -> "jpg" }
@@ -133,12 +135,23 @@ class DriveBackup(
                 if (viewableCopies) drive.upsertFile(docFolder, "original.$ext", raw, d.fileMime ?: "image/jpeg",
                     mapOf(P_KIND to "plain", P_DOC_FILE to "${d.id}:plain", P_UPDATED to stamp), "Readable copy: $description", P_DOC_FILE)
             }
+            // Further pages / back side: extra-0, extra-1… (same encryption; readable copies only if turned on)
+            val extras = d.attachments.drop(1)
+            extras.forEachIndexed { n, a ->
+                val x = when (a.mime) { "application/pdf" -> "pdf"; "image/png" -> "png"; else -> "jpg" }
+                files.get(a.id)?.let { raw ->
+                    drive.upsertFile(docFolder, "page-${n + 2}.$x.fdenc", seal(raw), OCTET, mapOf(P_KIND to "extra", "n" to "$n", P_DOC_FILE to "${d.id}:extra:$n", P_UPDATED to stamp, "ext" to x), "Encrypted page ${n + 2}: $description", P_DOC_FILE)
+                    if (viewableCopies) drive.upsertFile(docFolder, "page-${n + 2}.$x", raw, a.mime,
+                        mapOf(P_KIND to "plain-extra", "n" to "$n", P_DOC_FILE to "${d.id}:plain-extra:$n", P_UPDATED to stamp), "Readable copy: $description", P_DOC_FILE)
+                }
+            }
+            remote.filter { (it.props[P_KIND] == "extra" || it.props[P_KIND] == "plain-extra") && (it.props["n"]?.toIntOrNull() ?: 0) >= extras.size }.forEach { drive.trash(it.id) }
             d.pictureFile?.let { files.get(it) }?.let { pic ->
                 drive.upsertFile(docFolder, "picture.jpg.fdenc", seal(pic), OCTET, mapOf(P_KIND to "picture", P_DOC_FILE to "${d.id}:picture", P_UPDATED to stamp), null, P_DOC_FILE)
             }
             drive.upsertFile(docFolder, "details.fdenc", seal(docJson(d).toString().toByteArray()), OCTET,
                 mapOf(P_KIND to "details", P_DOC_FILE to "${d.id}:details", P_UPDATED to stamp), "Digitised details, encrypted", P_DOC_FILE)
-            if (!viewableCopies) remote.filter { it.props[P_KIND] == "plain" }.forEach { drive.trash(it.id) }
+            if (!viewableCopies) remote.filter { it.props[P_KIND] == "plain" || it.props[P_KIND] == "plain-extra" }.forEach { drive.trash(it.id) }
             uploaded++
         }
 
@@ -212,7 +225,13 @@ class DriveBackup(
                 val dj = JSONObject(String(open(drive.download(details.id))))
                 val fileId = parts.firstOrNull { it.props[P_KIND] == "original" }?.let { f -> ("d-" + dj.getString("id") + "-file").also { blobs[it] = open(drive.download(f.id)) } }
                 val picId = parts.firstOrNull { it.props[P_KIND] == "picture" }?.let { f -> ("d-" + dj.getString("id") + "-pic").also { blobs[it] = open(drive.download(f.id)) } }
-                docs += docFromJson(dj, fileId, picId)
+                val mimes = dj.optJSONArray("more")
+                val more = parts.filter { it.props[P_KIND] == "extra" }.sortedBy { it.props["n"]?.toIntOrNull() ?: 0 }.mapIndexed { n, f ->
+                    val id = "d-" + dj.getString("id") + "-x$n"
+                    blobs[id] = open(drive.download(f.id))
+                    Attachment(id, mimes?.optString(n)?.takeIf { it.isNotEmpty() } ?: if (f.props["ext"] == "pdf") "application/pdf" else "image/jpeg")
+                }
+                docs += docFromJson(dj, fileId, picId).copy(moreFiles = Attachment.encode(more))
             }
         }
         var accountPhoto: String? = null
@@ -241,6 +260,7 @@ class DriveBackup(
         .put("display", d.display.name).put("fields", d.fieldsJson).put("text", d.rawText).put("ocr", d.readByOcr)
         .put("country", d.country ?: JSONObject.NULL).put("created", d.createdAt).put("updated", d.updatedAt).put("event", d.eventId ?: JSONObject.NULL)
         .put("flag", d.showFlag ?: JSONObject.NULL)
+        .put("more", JSONArray(d.attachments.drop(1).map { it.mime }))
 
     private fun docFromJson(j: JSONObject, fileId: String?, picId: String?) = DocumentEntity(
         id = j.getString("id"), memberId = j.getString("member"), name = j.getString("name"), fileId = fileId,

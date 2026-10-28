@@ -1,6 +1,8 @@
 package com.familydocs.app.ui.document
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -77,14 +79,19 @@ fun DocumentScreen(docId: String, onBack: () -> Unit, onEdit: (memberId: String)
     var revealed by remember { mutableStateOf(setOf<Int>()) }
     var zoomed by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
-    val pages by produceState<List<ImageBitmap>>(emptyList(), d.fileId) {
+    // Every page of every file (front, back, PDF pages…), in order.
+    val pages by produceState<List<ImageBitmap>>(emptyList(), d.fileId, d.moreFiles) {
         value = withContext(Dispatchers.IO) {
-            d.fileId?.let { app.files.get(it) }?.let { bytes ->
-                if (d.fileMime == "application/pdf") Images.renderPdf(context, bytes, pages = 6).map { it.asImageBitmap() }
-                else listOfNotNull(Images.decode(bytes, 2000)?.asImageBitmap())
-            } ?: emptyList()
+            d.attachments.flatMap { a ->
+                app.files.get(a.id)?.let { bytes ->
+                    if (a.mime == "application/pdf") Images.renderPdf(context, bytes, pages = 6).map { it.asImageBitmap() }
+                    else listOfNotNull(Images.decode(bytes, 2000)?.asImageBitmap())
+                }.orEmpty()
+            }
         }
     }
+    // Only the details that have a value.
+    val filled = d.fields.filter { it.value.isNotBlank() }
 
     Column(Modifier.fillMaxSize().background(c.bg).statusBarsPadding()) {
         FdTopBar("", onBack) { FdIconButton("edit", { onEdit(d.memberId) }, iconSize = 20.dp, description = "Edit document") }
@@ -98,19 +105,23 @@ fun DocumentScreen(docId: String, onBack: () -> Unit, onEdit: (memberId: String)
                 }
             }
             // `.docimg`
-            pages.firstOrNull()?.let { first ->
+            if (pages.isNotEmpty()) {
+                val pager = rememberPagerState { pages.size }
                 Box(Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp).fillMaxWidth().clip(RoundedCornerShape(18.dp)).border(1.dp, c.line, RoundedCornerShape(18.dp))
-                    .background(c.surface2).clickable { zoomed = true }) {
-                    Image(first, "${d.name} scan", Modifier.fillMaxWidth(), contentScale = ContentScale.FillWidth)
+                    .background(c.surface2)) {
+                    HorizontalPager(pager, Modifier.fillMaxWidth()) { i ->
+                        Image(pages[i], "${d.name}, page ${i + 1}", Modifier.fillMaxWidth().clickable { zoomed = true }, contentScale = ContentScale.FillWidth)
+                    }
                     Box(Modifier.align(Alignment.BottomEnd).padding(10.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xB30A0E18)).padding(horizontal = 9.dp, vertical = 5.dp)) {
-                        Text(if (pages.size > 1) "Tap to zoom · ${pages.size} pages" else "Tap to zoom", style = fdText(11f, color = Color.White))
+                        Text(if (pages.size > 1) "${pager.currentPage + 1} / ${pages.size} · swipe · tap to zoom" else "Tap to zoom", style = fdText(11f, color = Color.White))
                     }
                 }
+                if (pages.size > 1) PageDots(pages.size, pager.currentPage, Modifier.fillMaxWidth().padding(top = 8.dp))
             }
-            FdSectionTitle("Details") { Text("${d.fields.size} field${if (d.fields.size == 1) "" else "s"}", style = fdText(11f, FontWeight.Medium, c.muted)) }
-            if (d.fields.isEmpty()) FdEmpty("No details saved. Tap edit to add them.")
+            FdSectionTitle("Details") { Text("${filled.size} field${if (filled.size == 1) "" else "s"}", style = fdText(11f, FontWeight.Medium, c.muted)) }
+            if (filled.isEmpty()) FdEmpty("No details saved. Tap edit to add them.")
             else Column(Modifier.padding(horizontal = 20.dp).fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(c.surface).border(1.dp, c.line, RoundedCornerShape(18.dp))) {
-                d.fields.forEachIndexed { i, f ->
+                filled.forEachIndexed { i, f ->
                     if (i > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(c.line))
                     val show = !f.sensitive || i in revealed
                     Row(Modifier.padding(start = 14.dp, end = 6.dp, top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {

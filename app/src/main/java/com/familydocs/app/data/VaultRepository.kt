@@ -116,7 +116,7 @@ class VaultRepository(private val dao: VaultDao, val files: FileStore) {
 
     suspend fun deleteMember(id: String) = withContext(Dispatchers.IO) {
         if (dao.memberNow(id)?.shared == true) return@withContext // the Common vault can't be removed
-        dao.documentsNow(id).forEach { files.delete(it.fileId); files.delete(it.pictureFile) }
+        dao.documentsNow(id).forEach { it.attachments.forEach { a -> files.delete(a.id) }; files.delete(it.pictureFile) }
         dao.memberNow(id)?.let { files.delete(it.photoFile) }
         dao.deleteMember(id)
     }
@@ -126,7 +126,7 @@ class VaultRepository(private val dao: VaultDao, val files: FileStore) {
     }
 
     suspend fun deleteDocument(id: String) = withContext(Dispatchers.IO) {
-        dao.documentNow(id)?.let { files.delete(it.fileId); files.delete(it.pictureFile) }
+        dao.documentNow(id)?.let { it.attachments.forEach { a -> files.delete(a.id) }; files.delete(it.pictureFile) }
         dao.deleteDocument(id)
     }
 
@@ -146,7 +146,7 @@ class VaultRepository(private val dao: VaultDao, val files: FileStore) {
     }
     /** Deletes the event and the tickets/bookings added only for it. Pinned vault documents are untouched. */
     suspend fun deleteEvent(id: String) = withContext(Dispatchers.IO) {
-        dao.eventDocumentsNow(id).forEach { files.delete(it.fileId); files.delete(it.pictureFile) }
+        dao.eventDocumentsNow(id).forEach { it.attachments.forEach { a -> files.delete(a.id) }; files.delete(it.pictureFile) }
         dao.eventNow(id)?.let { files.delete(it.photoFile) }
         dao.deleteEventDocuments(id)
         dao.deleteEventRow(id)

@@ -12,6 +12,10 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
+import com.familydocs.app.ui.ds.BtnKind
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -98,11 +102,14 @@ fun AddDocumentScreen(memberId: String, docId: String?, onBack: () -> Unit, onSa
     var cameraUri by rememberSaveable { mutableStateOf<String?>(null) }
     var showRaw by remember { mutableStateOf(false) }
 
-    val openDoc = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { vm.onFile(context, it) } }
-    val takePicture = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok -> val u = cameraUri?.let(Uri::parse); if (ok && u != null) vm.onFile(context, u) }
+    // -1 = add the picked file after the others; otherwise the index of the file it replaces
+    var target by rememberSaveable { mutableStateOf(-1) }
+    val openDoc = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { vm.onFile(context, it, target.takeIf { t -> t >= 0 }) } }
+    val takePicture = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok -> val u = cameraUri?.let(Uri::parse); if (ok && u != null) vm.onFile(context, u, target.takeIf { t -> t >= 0 }) }
     val pickPicture = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> uri?.let { vm.onCustomPicture(context, it) } }
-    fun upload() { app.appLock.expectExternalActivity(); openDoc.launch(arrayOf("image/*", "application/pdf")) }
-    fun camera() {
+    fun upload(replace: Int = -1) { target = replace; app.appLock.expectExternalActivity(); openDoc.launch(arrayOf("image/*", "application/pdf")) }
+    fun camera(replace: Int = -1) {
+        target = replace
         val f = File(context.cacheDir, "camera").apply { mkdirs() }.let { File(it, "scan.jpg") }
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", f)
         cameraUri = uri.toString(); app.appLock.expectExternalActivity(); takePicture.launch(uri)
@@ -116,21 +123,37 @@ fun AddDocumentScreen(memberId: String, docId: String?, onBack: () -> Unit, onSa
 
             // ---------- File ----------
             FdSectionTitle("File", Modifier.padding(top = 0.dp))
-            val preview = vm.preview
-            if (preview != null) {
+            val atts = vm.attachments
+            if (atts.isNotEmpty()) {
+                // Front, back, more pages: swipe between them; Replace / Remove act on the one showing.
+                val pager = rememberPagerState { atts.size }
+                var lastCount by remember { mutableStateOf(atts.size) }
+                LaunchedEffect(atts.size) { if (atts.size > lastCount) pager.animateScrollToPage(atts.size - 1); lastCount = atts.size }
                 Box(Modifier.padding(horizontal = 20.dp).fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(c.surface2).border(1.dp, c.line, RoundedCornerShape(18.dp))) {
-                    Image(preview.asImageBitmap(), "Selected document", Modifier.fillMaxWidth(), contentScale = ContentScale.FillWidth)
-                    if (vm.ocr is OcrState.Reading) ScanLine(Modifier.matchParentSize())
-                    Row(Modifier.align(Alignment.BottomEnd).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        DarkPill("Replace", "refresh", ::upload)
-                        DarkPill("Remove", "trash", vm::removeFile)
+                    HorizontalPager(pager, Modifier.fillMaxWidth()) { i ->
+                        val p = atts.getOrNull(i)?.preview
+                        if (p != null) Image(p.asImageBitmap(), "Page ${i + 1}", Modifier.fillMaxWidth(), contentScale = ContentScale.FillWidth)
+                        else Box(Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) { FdIcon("file", 34.dp, tint = c.muted) }
                     }
+                    if (vm.ocr is OcrState.Reading) ScanLine(Modifier.matchParentSize())
+                    if (atts.size > 1) Box(Modifier.align(Alignment.TopEnd).padding(8.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xB80A0E18)).padding(horizontal = 9.dp, vertical = 4.dp)) {
+                        Text("${pager.currentPage + 1} / ${atts.size}", style = fdText(11.5f, color = Color.White))
+                    }
+                    Row(Modifier.align(Alignment.BottomEnd).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        DarkPill("Replace", "refresh") { upload(pager.currentPage) }
+                        DarkPill("Remove", "trash") { vm.removeAttachment(pager.currentPage) }
+                    }
+                }
+                if (atts.size > 1) PageDots(atts.size, pager.currentPage, Modifier.fillMaxWidth().padding(top = 8.dp))
+                Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    FdButton("Scan another page", { camera() }, Modifier.weight(1f), BtnKind.Ghost, icon = "camera")
+                    FdButton("Add file", { upload() }, Modifier.weight(1f), BtnKind.Ghost, icon = "plus")
                 }
             } else {
                 Column(Modifier.padding(horizontal = 20.dp).fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(c.surface).dashedBorder(c.line, radius = 20.dp).padding(18.dp)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        PickOption("Scan", "Use camera", "camera", Modifier.weight(1f), ::camera)
-                        PickOption("Upload", "Image or PDF", "upload", Modifier.weight(1f), ::upload)
+                        PickOption("Scan", "Use camera", "camera", Modifier.weight(1f)) { camera() }
+                        PickOption("Upload", "Image or PDF", "upload", Modifier.weight(1f)) { upload() }
                     }
                 }
             }
@@ -247,6 +270,18 @@ private fun DisplayOption(label: String, selected: Boolean, enabled: Boolean, mo
 }
 
 /** `.preview .bar button` */
+/** Small dots under a swipeable set of pages. */
+@Composable
+fun PageDots(count: Int, current: Int, modifier: Modifier = Modifier) {
+    val c = Fd.c
+    Row(modifier, horizontalArrangement = Arrangement.Center) {
+        repeat(count) { i ->
+            Box(Modifier.padding(horizontal = 3.dp).size(if (i == current) 7.dp else 6.dp).clip(androidx.compose.foundation.shape.CircleShape)
+                .background(if (i == current) c.fg.copy(alpha = .7f) else c.muted.copy(alpha = .35f)))
+        }
+    }
+}
+
 @Composable
 private fun DarkPill(label: String, icon: String, onClick: () -> Unit) {
     Row(Modifier.clip(RoundedCornerShape(10.dp)).background(Color(0xB80A0E18)).clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 6.dp),
