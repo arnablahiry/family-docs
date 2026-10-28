@@ -41,7 +41,7 @@ jobs:
         run: |
           VC="${{ github.event.inputs.versionCode }}"; VN="${{ github.event.inputs.versionName }}"
           set -o pipefail
-          ./gradlew testDebugUnitTest assembleRelease ${VC:+-Pfamilydocs.versionCode=$VC} ${VN:+-Pfamilydocs.versionName=$VN} 2>&1 | tee build.log
+          ./gradlew --continue testDebugUnitTest assembleRelease ${VC:+-Pfamilydocs.versionCode=$VC} ${VN:+-Pfamilydocs.versionName=$VN} 2>&1 | tee build.log
       - name: Summarise build errors (shown on the run page, no sign-in needed)
         if: failure()
         run: |

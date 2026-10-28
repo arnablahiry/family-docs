@@ -5,6 +5,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.room)
 }
 
 android {
@@ -49,7 +50,8 @@ android {
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
 }
 
-ksp { arg("room.schemaLocation", "$projectDir/schemas") }
+// Room's Gradle plugin keeps one schema copy per build variant, so debug and release KSP runs can't clash over the same file.
+room { schemaDirectory("$projectDir/schemas") }
 
 dependencies {
     implementation(libs.androidx.core.ktx)
