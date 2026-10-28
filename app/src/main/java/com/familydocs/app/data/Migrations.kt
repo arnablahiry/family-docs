@@ -39,7 +39,15 @@ val MIGRATION_2_3 = object : Migration(2, 3) {
     }
 }
 
+/** v4: per-document "show flag on card" choice (NULL = the type's default). Nothing existing changes. */
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE documents ADD COLUMN showFlag INTEGER")
+    }
+}
+
 val ALL_MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_1_2,
     MIGRATION_2_3,
+    MIGRATION_3_4,
 )

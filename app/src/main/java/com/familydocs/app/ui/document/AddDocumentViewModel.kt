@@ -44,6 +44,9 @@ class AddDocumentViewModel(private val c: AppContainer, private val appContext: 
     var saving by mutableStateOf(false); private set
     /** Issuing country picked by the user; null = follow what the scan / name suggests. */
     var countryChoice by mutableStateOf<String?>(null)
+    /** "Show flag on card": null = the type's default (on for national ID cards). */
+    var showFlagChoice by mutableStateOf<Boolean?>(null)
+    val showFlag: Boolean get() = showFlagChoice ?: DocTypes.flagByDefault(name)
 
     val country: String
         get() = countryChoice ?: Countries.infer(name, fields.map { DocField(it.label, it.value) }, rawText)
@@ -60,7 +63,7 @@ class AddDocumentViewModel(private val c: AppContainer, private val appContext: 
         if (docId != null) viewModelScope.launch {
             val d = c.repo.documentNow(docId) ?: return@launch
             existing = d
-            name = d.name; display = d.display; rawText = d.rawText; fileMime = d.fileMime; countryChoice = d.country
+            name = d.name; display = d.display; rawText = d.rawText; fileMime = d.fileMime; countryChoice = d.country; showFlagChoice = d.showFlag
             fields.addAll(d.fields.map { EditField(label = it.label, value = it.value, auto = it.auto, verified = it.verified) })
             fieldsTouched = true
             if (d.readByOcr) ocr = OcrState.Done(null, d.fields.count { it.auto })
@@ -150,7 +153,7 @@ class AddDocumentViewModel(private val c: AppContainer, private val appContext: 
             }
             val doc = (old ?: DocumentEntity(id = UUID.randomUUID().toString(), memberId = memberId, name = name, fileId = null, fileMime = null, eventId = eventId)).copy(
                 name = name.trim(), fileId = fileId, fileMime = if (fileId == null) null else fileMime, display = display, pictureFile = pictureId,
-                rawText = rawText, readByOcr = ocr is OcrState.Done, country = country,
+                rawText = rawText, readByOcr = ocr is OcrState.Done, country = country, showFlag = showFlagChoice,
             )
             c.repo.saveDocument(doc, fields.filter { it.label.isNotBlank() || it.value.isNotBlank() }.map {
                 DocField(it.label.trim(), it.value.trim(), DocTypes.isSensitive(it.label), it.auto, it.verified)

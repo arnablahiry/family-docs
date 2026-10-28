@@ -25,7 +25,8 @@ import com.familydocs.app.R
 // Generated from the demo's cardart.js. Same scene as the demo: sky gradient, (for national ID cards) the issuing
 // country's flag, faint and tilted, hill 1, the type's motif image, hills 2 and 3. Colours are always the type's own.
 
-/** National ID cards: these show the issuing country's flag faintly behind the hills. */
+/** National ID cards: these show the issuing country's flag faintly behind the hills unless the user turns it off
+ *  (and any other document can turn it on: DocumentEntity.showFlag). */
 val NATIONAL_CARD_TYPES = setOf("aadhaar", "visa", "residence", "id", "pan", "voter", "social", "tax")
 private const val FLAG_ALPHA = .13f
 
@@ -93,15 +94,14 @@ fun cardPalette(key: String, hue: Long): List<Color> {
 /** The illustrated background of a wallet card (demo `cardSceneSVG`), drawn at any size. */
 @Composable
 @SuppressLint("DiscouragedApi")
-fun CardScene(key: String, hue: Long, country: String?, modifier: Modifier = Modifier) {
+fun CardScene(key: String, hue: Long, country: String?, modifier: Modifier = Modifier, showFlag: Boolean = key in NATIONAL_CARD_TYPES) {
     val p = cardPalette(key, hue)
     val motif = MOTIFS[key]
     val ctx = LocalContext.current
     // Full flags (cflag_xx, 4:3), tilted per card and scaled just enough to keep the card filled (demo flagPose).
     val flagId = remember(key, country) {
-        if (key in NATIONAL_CARD_TYPES && !country.isNullOrEmpty())
-            ctx.resources.getIdentifier("cflag_" + country.lowercase(), "drawable", ctx.packageName) else 0
-    }
+        if (!country.isNullOrEmpty()) ctx.resources.getIdentifier("cflag_" + country.lowercase(), "drawable", ctx.packageName) else 0
+    }.takeIf { showFlag } ?: 0
     val flag = if (flagId != 0) painterResource(flagId) else null
     val tilt = remember(key, country) { flagTilt(key, country.orEmpty().uppercase()) }
     Box(modifier) {

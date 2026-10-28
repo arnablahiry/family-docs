@@ -36,6 +36,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -109,7 +110,8 @@ fun MemberScreen(memberId: String, onBack: () -> Unit, onEdit: () -> Unit, onPas
                 if (expanded == null) return@pointerInput
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                    if (openBounds?.contains(down.position + origin) == true) return@awaitEachGesture
+                    val open = openBounds
+                    if (open != null && open.contains(down.position + origin)) return@awaitEachGesture
                     while (true) {
                         val ev = awaitPointerEvent(PointerEventPass.Initial)
                         val ch = ev.changes.firstOrNull { it.id == down.id } ?: break

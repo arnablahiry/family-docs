@@ -240,6 +240,7 @@ class DriveBackup(
     private fun docJson(d: DocumentEntity) = JSONObject().put("id", d.id).put("member", d.memberId).put("name", d.name).put("mime", d.fileMime ?: JSONObject.NULL)
         .put("display", d.display.name).put("fields", d.fieldsJson).put("text", d.rawText).put("ocr", d.readByOcr)
         .put("country", d.country ?: JSONObject.NULL).put("created", d.createdAt).put("updated", d.updatedAt).put("event", d.eventId ?: JSONObject.NULL)
+        .put("flag", d.showFlag ?: JSONObject.NULL)
 
     private fun docFromJson(j: JSONObject, fileId: String?, picId: String?) = DocumentEntity(
         id = j.getString("id"), memberId = j.getString("member"), name = j.getString("name"), fileId = fileId,
@@ -248,6 +249,7 @@ class DriveBackup(
         fieldsJson = j.optString("fields", "[]"), rawText = j.optString("text"), readByOcr = j.optBoolean("ocr"),
         country = if (j.isNull("country")) null else j.optString("country"), createdAt = j.optLong("created"), updatedAt = j.optLong("updated"),
         eventId = if (!j.has("event") || j.isNull("event")) null else j.getString("event"),
+        showFlag = if (!j.has("flag") || j.isNull("flag")) null else j.getBoolean("flag"),
     )
 
     private fun eventJson(e: com.familydocs.app.data.EventEntity) = JSONObject().put("id", e.id).put("name", e.name).put("art", e.art)

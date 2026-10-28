@@ -70,6 +70,9 @@ object DocTypes {
 
     fun isSensitive(label: String) = SENSITIVE.containsMatchIn(label)
 
+    /** National ID cards show the issuing country's flag on their card unless turned off; other documents only when turned on. */
+    fun flagByDefault(name: String) = forName(name).key in com.familydocs.app.ui.ds.NATIONAL_CARD_TYPES
+
     fun forName(name: String): DocType {
         val n = name.trim()
         RULES.firstOrNull { it.first.containsMatchIn(n) }?.let { return it.second }

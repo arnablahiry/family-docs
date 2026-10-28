@@ -59,6 +59,9 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.familydocs.app.data.DisplayMode
+import com.familydocs.app.ui.ds.FdSwitch
+import com.familydocs.app.ui.ds.FdListItem
+import com.familydocs.app.ui.ds.FdList
 import com.familydocs.app.domain.Countries
 import com.familydocs.app.domain.DocTypes
 import com.familydocs.app.ui.components.LocalContainer
@@ -152,6 +155,12 @@ fun AddDocumentScreen(memberId: String, docId: String?, onBack: () -> Unit, onSa
             FdSectionTitle("Issued by")
             Box(Modifier.padding(horizontal = 20.dp)) {
                 FdCountryPicker(listOf(vm.country), { vm.countryChoice = it }, multi = false, pinned = Countries.decode(account?.countries), allowNone = true)
+            }
+            // Faint flag behind the card art; on by default for national ID cards, any document can turn it on or off.
+            FdList(Modifier.padding(top = 10.dp)) {
+                FdListItem("Show flag on card", if (vm.country.isEmpty()) "Pick a country first" else "Faint and tilted behind the card art", first = true, trailing = {
+                    FdSwitch(vm.showFlag && vm.country.isNotEmpty(), { v -> vm.showFlagChoice = v }, "Show flag on card")
+                })
             }
 
             // ---------- Display picture ----------

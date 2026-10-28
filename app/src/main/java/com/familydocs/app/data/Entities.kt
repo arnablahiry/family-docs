@@ -61,8 +61,12 @@ data class DocumentEntity(
     val updatedAt: Long = System.currentTimeMillis(),
     /** Set for a ticket or booking added only for an event: it then shows in that event, not in the vault. Added in database version 3. */
     val eventId: String? = null,
+    /** Faint country flag behind the card art: null = the type's default (on for national ID cards). Added in database version 4. */
+    val showFlag: Boolean? = null,
 ) {
     val fields: List<DocField> get() = decodeFields(fieldsJson)
+    /** Whether the card shows its issuing country's flag. */
+    val flagShown: Boolean get() = showFlag ?: com.familydocs.app.domain.DocTypes.flagByDefault(name)
     val issuer: String get() = country ?: com.familydocs.app.domain.Countries.infer(name, fields, rawText)
 }
 

@@ -273,7 +273,7 @@ fun FdWalletCard(
             }
             else -> {
                 // `.wcard.art`: sky, hills and the type's motif; national documents in their country's flag colours.
-                CardScene(t.key, t.hue, doc.issuer.takeIf { it.isNotEmpty() }, Modifier.fillMaxSize())
+                CardScene(t.key, t.hue, doc.issuer.takeIf { it.isNotEmpty() }, Modifier.fillMaxSize(), showFlag = doc.flagShown)
                 Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(
                     if (c.dark) listOf(Color(0x42000000), Color(0x1A000000)) else listOf(Color(0x290A0F1E), Color.Transparent))))
             }
