@@ -86,9 +86,18 @@ object Fd {
 }
 
 /** px in the demo == sp/dp here. */
-fun fdText(size: Float, weight: FontWeight = FontWeight.Normal, color: Color = Color.Unspecified, spacing: Float = 0f, lineHeight: Float? = null) =
-    TextStyle(fontFamily = Abaddon, fontSize = size.sp, fontWeight = weight, color = color, letterSpacing = (spacing * size).sp,
-        lineHeight = (lineHeight ?: (size * 1.35f)).sp)
+/**
+ * Size actually used on the phone for a design size: the pixel font reads small, so captions and labels (9–13)
+ * are raised the most (11 → 13.3, 12 → 13.8), body text a little, and headings (16+) stay as designed.
+ * Still in sp, so the phone's own font-size setting applies on top. The demo uses the same curve.
+ */
+fun readableSize(size: Float): Float = if (size >= 16f) size else size + (16f - size) * .45f
+
+fun fdText(size: Float, weight: FontWeight = FontWeight.Normal, color: Color = Color.Unspecified, spacing: Float = 0f, lineHeight: Float? = null): TextStyle {
+    val s = readableSize(size)
+    return TextStyle(fontFamily = Abaddon, fontSize = s.sp, fontWeight = weight, color = color, letterSpacing = (spacing * s).sp,
+        lineHeight = (lineHeight?.let { it * s / size } ?: (s * 1.35f)).sp)
+}
 
 /**
  * Wraps the whole app: provides the tokens, sets the default text style/colour (this is what keeps

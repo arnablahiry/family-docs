@@ -162,7 +162,7 @@ fun AddDocumentScreen(memberId: String, docId: String?, onBack: () -> Unit, onSa
             FdSectionTitle("Document name")
             Row(Modifier.padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 FdDocTile(vm.name)
-                FdInput(vm.name, vm::onNameChange, Modifier.weight(1f), placeholder = "e.g. Passport, OCI card, Birth certificate")
+                FdInput(vm.name, vm::onNameChange, Modifier.weight(1f), placeholder = "e.g. Passport, Birth certificate")
             }
             val type = DocTypes.forName(vm.name)
             Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
