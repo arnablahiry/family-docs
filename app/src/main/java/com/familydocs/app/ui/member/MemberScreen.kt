@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+
 package com.familydocs.app.ui.member
 
 import androidx.activity.compose.BackHandler
@@ -9,6 +11,18 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.unit.Velocity
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.spring
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.foundation.LocalOverscrollConfiguration
+import kotlin.math.abs
+import kotlin.math.sign
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -122,7 +136,10 @@ fun MemberScreen(memberId: String, onBack: () -> Unit, onEdit: () -> Unit, onPas
             }
             .statusBarsPadding(),
     ) {
-        LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(bottom = 120.dp)) {
+        // Rubber band for the wallet: dragging past the top/bottom spreads/squishes the cards; letting go springs them back.
+        val rubber = remember { RubberBand(scope) }
+        CompositionLocalProvider(LocalOverscrollConfiguration provides null) {
+        LazyColumn(Modifier.fillMaxSize().nestedScroll(rubber), state = list, contentPadding = PaddingValues(bottom = 120.dp)) {
             item { FdTopBar("", onBack) { FdIconButton("edit", onEdit, iconSize = 20.dp, description = "Edit ${m.name}") } }
             // ---- hero ----
             item {
@@ -173,6 +190,7 @@ fun MemberScreen(memberId: String, onBack: () -> Unit, onEdit: () -> Unit, onPas
                             modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp),
                             owner = m,
                             onOpenBounds = { openBounds = it },
+                            stretch = { rubber.value },
                             onReorder = { newShown ->
                                 // Only the visible cards moved: hidden ones (other countries) keep their places.
                                 val moved = newShown.iterator(); val shownIds = newShown.toSet()
@@ -209,6 +227,7 @@ fun MemberScreen(memberId: String, onBack: () -> Unit, onEdit: () -> Unit, onPas
                 FdEmpty(if (docs.isEmpty()) "No documents yet. Tap Add document to scan or upload ${m.name}'s first card." else "No documents for the selected countries.",
                     Modifier.padding(top = 12.dp))
             }
+        }
         }
         FdFab("Add document", "plus", onAddDocument, Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 18.dp, bottom = 18.dp))
     }
@@ -267,3 +286,39 @@ private fun Tile(d: DocumentEntity?, pwCount: Int, modifier: Modifier, onClick: 
     }
 }
 
+/**
+ * Overscroll for the wallet: what the list can't scroll (past the top or the bottom) is collected with growing
+ * resistance into [value] (px: + pulled down at the top, − pushed up at the bottom); on release it springs back to 0
+ * with a little bounce. Scrolling back the other way first undoes the stretch.
+ */
+@Stable
+private class RubberBand(private val scope: kotlinx.coroutines.CoroutineScope) : NestedScrollConnection {
+    var value by mutableFloatStateOf(0f); private set
+    private var settle: kotlinx.coroutines.Job? = null
+
+    override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+        val o = value
+        if (source != NestedScrollSource.UserInput || o == 0f || sign(available.y) == sign(o)) return Offset.Zero
+        settle?.cancel()
+        val next = if (o > 0f) maxOf(0f, o + available.y) else minOf(0f, o + available.y)
+        value = next
+        return Offset(0f, next - o)
+    }
+
+    override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+        if (source != NestedScrollSource.UserInput || available.y == 0f) return Offset.Zero
+        settle?.cancel()
+        val resist = 1f / (1f + abs(value) / 260f)
+        value = (value + available.y * .55f * resist).coerceIn(-420f, 620f)
+        return Offset(0f, available.y)
+    }
+
+    override suspend fun onPreFling(available: Velocity): Velocity {
+        if (value == 0f) return Velocity.Zero
+        val from = value
+        settle = scope.launch {
+            animate(from, 0f, animationSpec = spring(dampingRatio = .42f, stiffness = 260f)) { v, _ -> value = v }
+        }
+        return available // the release springs the cards back instead of flinging the list
+    }
+}

@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.onClick
@@ -463,6 +464,7 @@ fun FdWalletStack(
     owner: com.familydocs.app.data.MemberEntity? = null,
     onOpenBounds: (androidx.compose.ui.geometry.Rect) -> Unit = {},
     onReorder: ((List<String>) -> Unit)? = null,
+    stretch: () -> Float = { 0f },
 ) {
     BoxWithConstraints(modifier.fillMaxWidth()) {
         val cardH = maxWidth / 1.586f
@@ -496,7 +498,17 @@ fun FdWalletStack(
         }
         val total = if (order.isEmpty()) 0.dp else tops.last() + cardH
         val height by animateDpAsState(total, tween(450, easing = FdEase), label = "stackH")
-        Box(Modifier.fillMaxWidth().height(height)) {
+        // Overscroll "magnet": pulled down at the top ([stretch] > 0) the cards spread apart, a little more further down
+        // the stack; pushed up at the bottom (< 0) they squish together. Read in the layout phase only, so it's smooth.
+        val minGapPx = with(density) { 18.dp.toPx() }
+        fun extra(i: Int): Float {
+            val s = stretch()
+            return if (s >= 0f) s * .32f * i * (1f + i * .06f) else maxOf(s * .3f, -(stripPx - minGapPx)) * i
+        }
+        Box(Modifier.fillMaxWidth().layout { m, c ->
+            val h = (height.toPx() + extra(order.lastIndex.coerceAtLeast(0))).roundToInt().coerceAtLeast(0)
+            val p = m.measure(c.copy(minHeight = h, maxHeight = h)); layout(p.width, h) { p.place(0, 0) }
+        }) {
             order.forEachIndexed { i, d ->
                 key(d.id) {
                     val dragging = d.id == dragId
@@ -505,7 +517,8 @@ fun FdWalletStack(
                     val dim by animateFloatAsState(if (openIndex >= 0 && !isOpen) .45f else 1f, tween(300), label = "cardDim")
                     val lift by animateFloatAsState(if (dragging) 1.03f else 1f, tween(180), label = "cardLift")
                     // The held card follows the finger; the others slide to make room.
-                    val place = if (dragging) Modifier.offset { IntOffset(0, (from * stripPx + dragDy).roundToInt()) } else Modifier.offset(y = top)
+                    val place = if (dragging) Modifier.offset { IntOffset(0, (from * stripPx + dragDy).roundToInt()) }
+                        else Modifier.offset { IntOffset(0, (top.toPx() + extra(i)).roundToInt()) }
                     FdWalletCard(
                         d, holderFallback, isOpen || dragging,
                         Modifier.zIndex(if (dragging) 1000f else i.toFloat()).then(place).height(cardH).alpha(dim)
