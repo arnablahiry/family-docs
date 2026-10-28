@@ -40,7 +40,14 @@ jobs:
       - name: Test and build
         run: |
           VC="${{ github.event.inputs.versionCode }}"; VN="${{ github.event.inputs.versionName }}"
-          ./gradlew testDebugUnitTest assembleRelease ${VC:+-Pfamilydocs.versionCode=$VC} ${VN:+-Pfamilydocs.versionName=$VN}
+          set -o pipefail
+          ./gradlew testDebugUnitTest assembleRelease ${VC:+-Pfamilydocs.versionCode=$VC} ${VN:+-Pfamilydocs.versionName=$VN} 2>&1 | tee build.log
+      - name: Summarise build errors (shown on the run page, no sign-in needed)
+        if: failure()
+        run: |
+          grep -E -A4 '^e: |What went wrong|FAILED|error:' build.log | head -150 > errs.txt || true
+          [ -s errs.txt ] || tail -60 build.log > errs.txt
+          echo "::error title=Build errors::$(sed 's/%/%25/g; s/\r//g' errs.txt | awk '{printf "%s%%0A", $0}')"
       - name: Name the APK
         run: |
           VN="${{ github.event.inputs.versionName }}"
