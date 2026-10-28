@@ -46,6 +46,8 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
@@ -427,13 +429,15 @@ private fun CardFold(back: Color, fold: Color, modifier: Modifier) {
 
 /**
  * The stacked wallet. Cards overlap leaving a 58dp strip. The first tap on ANY card (the last one too) lifts it out
- * whole; the cards below slide down out of its way and the other cards dim. A second tap opens it.
+ * whole; the cards below slide down out of its way and the other cards dim. A second tap opens it; a tap anywhere else
+ * (handled by the screen, see MemberScreen) or Back puts it back.
  */
 @Composable
 fun FdWalletStack(
     docs: List<DocumentEntity>, holderFallback: String, expandedId: String?,
     onExpand: (id: String?, topPx: Float) -> Unit, onOpen: (DocumentEntity) -> Unit, modifier: Modifier = Modifier,
     owner: com.familydocs.app.data.MemberEntity? = null,
+    onOpenBounds: (androidx.compose.ui.geometry.Rect) -> Unit = {},
 ) {
     BoxWithConstraints(modifier.fillMaxWidth()) {
         val cardH = maxWidth / 1.586f
@@ -453,6 +457,7 @@ fun FdWalletStack(
                 FdWalletCard(
                     d, holderFallback, isOpen,
                     Modifier.zIndex(i.toFloat()).offset(y = top).height(cardH).alpha(dim)
+                        .onGloballyPositioned { if (isOpen) onOpenBounds(it.boundsInRoot()) }
                         .tap { if (isOpen) onOpen(d) else onExpand(d.id, with(density) { tops[i].toPx() }) },
                     photoFile = owner?.photoFile, character = owner?.avatar, shared = owner?.shared == true,
                 )

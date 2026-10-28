@@ -1,5 +1,14 @@
 package com.familydocs.app.ui.member
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -78,6 +87,10 @@ fun MemberScreen(memberId: String, onBack: () -> Unit, onEdit: () -> Unit, onPas
     val account by app.repo.account.collectAsStateWithLifecycle(null)
     val settings by app.settings.state.collectAsStateWithLifecycle()
     var expanded by rememberSaveable { mutableStateOf<String?>(null) }
+    var openBounds by remember { mutableStateOf<Rect?>(null) }
+    var origin by remember { mutableStateOf(Offset.Zero) }
+    // Back puts a lifted card back before leaving the screen.
+    BackHandler(enabled = expanded != null) { expanded = null }
     var hidden by rememberSaveable(memberId) { mutableStateOf(listOf<String>()) }
     val list = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -87,7 +100,26 @@ fun MemberScreen(memberId: String, onBack: () -> Unit, onEdit: () -> Unit, onPas
     val shown = if (codes.size > 1) docs.filter { it.issuer !in hidden } else docs
     val open: (DocumentEntity) -> Unit = { expanded = null; onDocument(it.id) }
 
-    Box(Modifier.fillMaxSize().background(c.bg).statusBarsPadding()) {
+    Box(
+        Modifier.fillMaxSize().background(c.bg)
+            .onGloballyPositioned { origin = it.positionInRoot() }
+            // While a card is lifted, a tap anywhere outside it only puts it back (the tap does nothing else).
+            // Drags still scroll the list as usual.
+            .pointerInput(expanded != null) {
+                if (expanded == null) return@pointerInput
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    if (openBounds?.contains(down.position + origin) == true) return@awaitEachGesture
+                    while (true) {
+                        val ev = awaitPointerEvent(PointerEventPass.Initial)
+                        val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
+                        if ((ch.position - down.position).getDistance() > viewConfiguration.touchSlop) break
+                        if (!ch.pressed) { ch.consume(); expanded = null; break }
+                    }
+                }
+            }
+            .statusBarsPadding(),
+    ) {
         LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(bottom = 120.dp)) {
             item { FdTopBar("", onBack) { FdIconButton("edit", onEdit, iconSize = 20.dp, description = "Edit ${m.name}") } }
             // ---- hero ----
@@ -138,6 +170,7 @@ fun MemberScreen(memberId: String, onBack: () -> Unit, onEdit: () -> Unit, onPas
                             onOpen = open,
                             modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp),
                             owner = m,
+                            onOpenBounds = { openBounds = it },
                         )
                     }
                 }

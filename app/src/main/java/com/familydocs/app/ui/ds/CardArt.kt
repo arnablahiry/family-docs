@@ -15,14 +15,27 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.withTransform
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.sin
 import com.familydocs.app.R
 
 // Generated from the demo's cardart.js. Same scene as the demo: sky gradient, (for national ID cards) the issuing
-// country's flag at low opacity, hill 1, the type's motif image, hills 2 and 3. Colours are always the type's own.
+// country's minimal flag, faint and tilted, hill 1, the type's motif image, hills 2 and 3. Colours are always the type's own.
 
 /** National ID cards: these show the issuing country's flag faintly behind the hills. */
 val NATIONAL_CARD_TYPES = setOf("aadhaar", "visa", "residence", "id", "pan", "voter", "social")
-private const val FLAG_ALPHA = .22f
+private const val FLAG_ALPHA = .13f
+
+/** The flag's tilt for a card: 4–12° either way, fixed per document type + country (same hash as the demo). */
+fun flagTilt(key: String, country: String): Float {
+    var h = 7
+    for (ch in "$key:$country") h = h * 31 + ch.code
+    val u = h.toLong() and 0xFFFFFFFFL
+    return ((if ((u and 1L) == 1L) 1 else -1) * (4 + (u ushr 1) % 9)).toFloat()
+}
 
 private val TYPE_PALETTES: Map<String, LongArray> = mapOf(
     "passport" to longArrayOf(0xFF4A5E84, 0xFF2E3D5E, 0xFF3A4C70, 0xFF2D3C5A, 0xFF233049),
@@ -84,16 +97,25 @@ fun CardScene(key: String, hue: Long, country: String?, modifier: Modifier = Mod
     val p = cardPalette(key, hue)
     val motif = MOTIFS[key]
     val ctx = LocalContext.current
-    // Card-shaped flag images (cflag_xx, already cropped to the card) so they stay sharp at full card size.
-    val flag = remember(key, country) {
+    // Minimal flags (cflag_xx, 4:3), tilted per card and scaled just enough to keep the card filled (demo flagPose).
+    val flagId = remember(key, country) {
         if (key in NATIONAL_CARD_TYPES && !country.isNullOrEmpty())
             ctx.resources.getIdentifier("cflag_" + country.lowercase(), "drawable", ctx.packageName) else 0
     }
+    val flag = if (flagId != 0) painterResource(flagId) else null
+    val tilt = remember(key, country) { flagTilt(key, country.orEmpty().uppercase()) }
     Box(modifier) {
         Canvas(Modifier.fillMaxSize()) {
             drawRect(Brush.linearGradient(listOf(p[0], p[1]), Offset(0f, 0f), Offset(size.width * .35f, size.height)))
+            if (flag != null) {
+                val fw = size.width; val fh = fw * .75f
+                val a = Math.toRadians(abs(tilt).toDouble()); val c = cos(a).toFloat(); val sn = sin(a).toFloat()
+                val sc = maxOf((fw / 2 * c + size.height / 2 * sn) / (fw / 2), (fw / 2 * sn + size.height / 2 * c) / (fh / 2))
+                withTransform({
+                    rotate(tilt, center); scale(sc, sc, center); translate(0f, (size.height - fh) / 2f)
+                }) { with(flag) { draw(Size(fw, fh), alpha = FLAG_ALPHA) } }
+            }
         }
-        if (flag != 0) Image(painterResource(flag), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop, alpha = FLAG_ALPHA)
         Canvas(Modifier.fillMaxSize()) {
             val k = maxOf(size.width / 160f, size.height / 101f) // preserveAspectRatio xMidYMid slice
             val dx = (size.width - 160f * k) / 2f; val dy = (size.height - 101f * k) / 2f
