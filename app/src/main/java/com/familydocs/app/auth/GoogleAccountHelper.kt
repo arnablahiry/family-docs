@@ -85,9 +85,9 @@ class GoogleAccountHelper(private val appContext: Context) {
         fun explain(t: Throwable): String {
             val code = (t as? ApiException)?.statusCode ?: (t.cause as? ApiException)?.statusCode
             return when {
-                t is Cancelled -> "Google sign-in was cancelled"
+                t is Cancelled -> "Google sign-in didn't finish. If it closed by itself after you picked an account, Google doesn't know this app yet: finish the Google Cloud setup (README → Google setup)."
                 code == 10 || t.message?.contains("10:") == true ->
-                    "Google hasn't registered this app yet. Finish the Google Cloud setup (README → Google setup), then try again."
+                    "Google doesn't know this app yet (developer error 10). Finish the Google Cloud setup (README → Google setup), then try again."
                 code == 7 || t is java.io.IOException -> "No connection to Google. Check the internet and try again."
                 else -> "Google didn't connect: ${t.message ?: t.javaClass.simpleName}"
             }

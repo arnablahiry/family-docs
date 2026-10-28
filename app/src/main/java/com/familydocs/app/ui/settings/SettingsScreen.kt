@@ -156,7 +156,7 @@ fun SettingsScreen(onBack: () -> Unit, onEditAccount: () -> Unit, onChangePassco
     val connect = rememberGoogleConnect { r ->
         val action = pending; pending = null
         r.onSuccess { g -> if (action != null) run(action, g) }
-            .onFailure { if (it !is GoogleAccountHelper.Cancelled) toast.show(GoogleAccountHelper.explain(it)) }
+            .onFailure { toast.show(GoogleAccountHelper.explain(it)) }
     }
     fun drive(action: DriveAction) { if (busy != null) return; pending = action; connect() }
 

@@ -28,10 +28,14 @@ fun rememberGoogleConnect(onResult: (Result<GoogleAccountHelper.Session>) -> Uni
     }
 
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { r ->
-        if (r.resultCode != Activity.RESULT_OK) { latest(Result.failure(GoogleAccountHelper.Cancelled())); return@rememberLauncherForActivityResult }
+        // Google returns its real error (e.g. "app not registered") inside the result even when it closes itself,
+        // so always read it; only a plain back-out counts as cancelled.
         runCatching { app.google.resultFromIntent(r.data).accessToken }
-            .onSuccess { finish(it) }
-            .onFailure { latest(Result.failure(it)) }
+            .onSuccess { token -> if (r.resultCode == Activity.RESULT_OK || token != null) finish(token) else latest(Result.failure(GoogleAccountHelper.Cancelled())) }
+            .onFailure { e ->
+                val code = (e as? com.google.android.gms.common.api.ApiException)?.statusCode
+                latest(Result.failure(if (r.resultCode != Activity.RESULT_OK && (code == null || code == 16 || code == 12501)) GoogleAccountHelper.Cancelled() else e))
+            }
     }
 
     return remember(launcher) {

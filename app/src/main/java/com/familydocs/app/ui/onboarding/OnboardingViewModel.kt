@@ -94,7 +94,7 @@ class OnboardingViewModel(private val c: AppContainer) : ViewModel() {
                 withContext(Dispatchers.Default) { Images.decode(bytes, 900) }?.let { picked = it; removePhoto = false }
             }
             if (!editing) foundBackup = runCatching { c.backup.hasBackup(s.token) }.getOrDefault(false)
-        }.onFailure { if (it !is GoogleAccountHelper.Cancelled) message = GoogleAccountHelper.explain(it) }
+        }.onFailure { message = GoogleAccountHelper.explain(it) }
         busy = false
     }
 
@@ -102,7 +102,7 @@ class OnboardingViewModel(private val c: AppContainer) : ViewModel() {
     fun signIn(r: Result<GoogleAccountHelper.Session>, onRestored: () -> Unit) = viewModelScope.launch {
         val s = r.getOrElse {
             busy = false
-            if (it !is GoogleAccountHelper.Cancelled) restoreError = GoogleAccountHelper.explain(it)
+            restoreError = GoogleAccountHelper.explain(it)
             return@launch
         }
         session = s; busy = true; restoreError = null

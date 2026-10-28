@@ -165,7 +165,7 @@ fun LockScreen(activity: FragmentActivity) {
         r.onSuccess { g ->
             if (g.profile.email.equals(email, ignoreCase = true)) { forgot = false; resetting = true }
             else forgotError = "That Google account (${g.profile.email}) isn't the one this vault backs up to."
-        }.onFailure { if (it !is com.familydocs.app.auth.GoogleAccountHelper.Cancelled) forgotError = com.familydocs.app.auth.GoogleAccountHelper.explain(it) }
+        }.onFailure { forgotError = com.familydocs.app.auth.GoogleAccountHelper.explain(it) }
     }
 
     if (forgot) {

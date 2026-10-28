@@ -187,7 +187,7 @@ fun RegisterScreen(vm: OnboardingViewModel, onBack: () -> Unit, title: String = 
             }
 
             // ---- Google account: Drive backups and signing in on a new phone ----
-            FdField("Google account", error = e["email"], hint = vm.message ?: "Backups go to this Google Drive. Signing in with it on a new phone brings everything back.") {
+            FdField("Google account", error = e["email"], hint = "Backups go to this Google Drive. Signing in with it on a new phone brings everything back.".takeIf { vm.message == null }) {
                 if (vm.googleLinked) Row(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.accentSoft).padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -201,6 +201,7 @@ fun RegisterScreen(vm: OnboardingViewModel, onBack: () -> Unit, title: String = 
                     FdIconButton("close", vm::unlinkGoogle, iconSize = 18.dp, description = "Unlink Google")
                 }
                 else GoogleButton(busy = vm.busy) { vm.googleStarted(); connectGoogle() }
+                vm.message?.let { FdBanner("info", it, Modifier.padding(top = 4.dp)) }
                 if (vm.foundBackup) FdBanner("cloud", "This Google account already has a Family Docs backup.", Modifier.padding(top = 4.dp)) {
                     FdTextButton("Restore it", onRestoreInstead)
                 }
