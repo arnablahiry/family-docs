@@ -191,6 +191,7 @@ fun MemberScreen(memberId: String, onBack: () -> Unit, onEdit: () -> Unit, onPas
                             owner = m,
                             onOpenBounds = { openBounds = it },
                             stretch = { rubber.value },
+                            tilt = { rubber.tilt },
                             onReorder = { newShown ->
                                 // Only the visible cards moved: hidden ones (other countries) keep their places.
                                 val moved = newShown.iterator(); val shownIds = newShown.toSet()
@@ -305,11 +306,22 @@ private class RubberBand(private val scope: kotlinx.coroutines.CoroutineScope) :
         return Offset(0f, next - o)
     }
 
+    /** Degrees the cards lean while the list moves (scrolls and flings alike); eases back to level when it stops. */
+    var tilt by mutableFloatStateOf(0f); private set
+    private var level: kotlinx.coroutines.Job? = null
+    private fun lean(dy: Float) {
+        if (dy == 0f) return
+        tilt = (tilt * .72f + dy * .06f).coerceIn(-6f, 6f)
+        level?.cancel()
+        level = scope.launch { kotlinx.coroutines.delay(60); animate(tilt, 0f, animationSpec = spring(dampingRatio = .7f, stiffness = 110f)) { v, _ -> tilt = v } }
+    }
+
     override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+        lean(consumed.y)
         if (source != NestedScrollSource.UserInput || available.y == 0f) return Offset.Zero
         settle?.cancel()
-        val resist = 1f / (1f + abs(value) / 260f)
-        value = (value + available.y * .55f * resist).coerceIn(-420f, 620f)
+        val resist = 1f / (1f + abs(value) / 320f)
+        value = (value + available.y * .5f * resist).coerceIn(-420f, 620f)
         return Offset(0f, available.y)
     }
 
@@ -317,7 +329,7 @@ private class RubberBand(private val scope: kotlinx.coroutines.CoroutineScope) :
         if (value == 0f) return Velocity.Zero
         val from = value
         settle = scope.launch {
-            animate(from, 0f, animationSpec = spring(dampingRatio = .42f, stiffness = 260f)) { v, _ -> value = v }
+            animate(from, 0f, animationSpec = spring(dampingRatio = .55f, stiffness = 170f)) { v, _ -> value = v }
         }
         return available // the release springs the cards back instead of flinging the list
     }

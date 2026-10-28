@@ -288,13 +288,16 @@ fun FdWalletCard(
     val paper = tpl == CardTpl.PAPER
     val ink = if (paper) c.mix(hue, .45f, c.fg) else Color.White
     val sheet = c.mix(hue, .10f, c.surface)
-    val shadow by animateDpAsState(if (open) 18.dp else 6.dp, tween(350, easing = FdEase), label = "cardShadow")
+    val shadow by animateDpAsState(if (open) 18.dp else 8.dp, tween(350, easing = FdEase), label = "cardShadow")
+    // The lifted (selected) card gets a soft light rim.
+    val rim by animateFloatAsState(if (open) 1f else 0f, tween(300, easing = FdEase), label = "cardRim")
     val shape = RoundedCornerShape(18.dp)
     val dates = doc.cardDates()
     val holder = doc.holder(holderFallback)
 
     BoxWithConstraints(
         modifier.fillMaxWidth().shadow(shadow, shape, ambientColor = deep, spotColor = deep).clip(shape)
+            .border(1.5.dp, (if (paper) hue.copy(alpha = .55f) else Color.White.copy(alpha = .5f)).copy(alpha = (if (paper) .55f else .5f) * rim), shape)
             .then(if (paper) Modifier.background(sheet).border(1.dp, hue.copy(alpha = .22f), shape)
             else Modifier.background(Brush.linearGradient(listOf(hue, deep), Offset.Zero, Offset(900f, 1100f)))),
     ) {
@@ -468,6 +471,7 @@ fun FdWalletStack(
     onOpenBounds: (androidx.compose.ui.geometry.Rect) -> Unit = {},
     onReorder: ((List<String>) -> Unit)? = null,
     stretch: () -> Float = { 0f },
+    tilt: () -> Float = { 0f },
 ) {
     BoxWithConstraints(modifier.fillMaxWidth()) {
         val cardH = maxWidth / 1.586f
@@ -548,7 +552,8 @@ fun FdWalletStack(
                         // Stays on top while held and while landing; then takes its place in the stack so the cards
                         // below close up over it (no snap behind them at the end).
                         Modifier.zIndex(if (dragging || d.id == landingId) 1000f else i.toFloat()).then(place).height(cardH).alpha(dim)
-                            .graphicsLayer { scaleX = lift; scaleY = lift }
+                            // scrolling: the cards lean back a little with the motion (a touch less further down)
+                            .graphicsLayer { scaleX = lift; scaleY = lift; if (!dragging) { rotationX = tilt() * (1f - i * .05f).coerceAtLeast(.55f); cameraDistance = 16f * density } }
                             .onGloballyPositioned { if (isOpen) onOpenBounds(it.boundsInRoot()) }
                             // One gesture handler for both (a separate clickable would grab the touch first):
                             // quick tap → lift / open; hold still ~0.4 s → pick up and drag; move straight away → the list scrolls.
