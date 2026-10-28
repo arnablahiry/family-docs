@@ -226,10 +226,15 @@ fun EventScreen(eventId: String, onBack: () -> Unit, onEdit: () -> Unit, onDocum
                 }
             }
             FdButton("Pin from people's vaults", { pickSuggested = emptySet(); picking = true }, Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp), BtnKind.Ghost, icon = "people")
-            if (e.notes.isNotBlank()) {
-                FdSectionTitle("Notes")
-                FdList { Text(e.notes, style = fdText(13f, lineHeight = 18f), modifier = Modifier.padding(14.dp)) }
+            // Notes: always here, written right on the page and saved as you type (a moment after you stop).
+            FdSectionTitle("Notes")
+            var note by remember(e.id) { mutableStateOf(e.notes) }
+            LaunchedEffect(note) {
+                if (note == e.notes) return@LaunchedEffect
+                kotlinx.coroutines.delay(600)
+                app.repo.saveEvent(e.copy(notes = note))
             }
+            FdInput(note, { note = it }, Modifier.padding(horizontal = 20.dp), placeholder = "Hotel, train times, what to carry… (saved as you type)", singleLine = false)
             FdButton("Delete event", { confirmDelete = true }, Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 30.dp), BtnKind.Ghost, icon = "trash", contentColor = c.danger)
         }
     }
