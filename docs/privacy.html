@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lararium · Privacy policy</title>
+<style>
+body{margin:0;font:16px/1.65 -apple-system,Segoe UI,Roboto,sans-serif;background:#F7F3EC;color:#1E2F55}
+main{max-width:720px;margin:0 auto;padding:44px 20px 64px} h1{font-size:32px;margin:0 0 6px} h2{font-size:19px;margin:28px 0 6px}
+p,li{color:#2b3550} small{color:#5b6478} a{color:#1E2F55}
+</style></head><body><main>
+<h1>Privacy policy</h1>
+<small>Lararium (Android app) · Last updated 29 October 2026</small>
+
+<h2>In short</h2>
+<p>Lararium keeps your family's documents on your phone, encrypted. Nothing is sent to the developer. There are no ads,
+no analytics and no tracking.</p>
+
+<h2>What the app stores on your phone</h2>
+<ul>
+<li>The documents, photos, details and logins you add, the people and groups you create, and your settings.</li>
+<li>All of it is stored in an encrypted database and encrypted files, protected by your passcode / fingerprint and the
+phone's secure key storage.</li>
+</ul>
+
+<h2>Google sign-in and Google Drive</h2>
+<p>If you choose "Continue with Google", the app asks Google for:</p>
+<ul>
+<li><b>Your name, email address and profile photo</b>, to show on your account and to know which Drive holds your backup.</li>
+<li><b>Access to files the app creates in your Google Drive</b> (<code>drive.file</code>) and to the app's hidden app folder
+(<code>drive.appdata</code>). The app cannot see any other files in your Drive.</li>
+</ul>
+<p>Backups are written to a "Lararium" folder in <b>your own</b> Google Drive. Documents and logins are encrypted before they
+leave the phone; the backup key is kept in the app's hidden folder in your Drive so you can restore on a new phone.
+Logins are always encrypted. You can delete the backup from the app at any time (Settings), or revoke the app's access in
+your Google Account.</p>
+<p>Lararium's use of information received from Google APIs adheres to the
+<a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>,
+including the Limited Use requirements. The data is used only to provide the backup, restore and group-sharing features
+you ask for, is not transferred to anyone else, and is never used for advertising.</p>
+
+<h2>Sharing a group with other people</h2>
+<p>If you invite someone to a group, your phone puts an encrypted copy of your own and the group's shared documents in your
+Drive, shared by link. It can only be read with the group's code, which travels inside the invite you send. You decide who
+gets an invite.</p>
+
+<h2>Join requests</h2>
+<p>To let someone ask to join a group with just its code, the app uses a small Google Firebase database as a mailbox, with an
+anonymous sign-in (no name or email). What it stores there is encrypted: the group is found by a hash of its code, names
+are sealed with the code, and the reply to a request is sealed to the requester's phone. Requests can be deleted by the
+person who sent them.</p>
+
+<h2>What the developer receives</h2>
+<p>Nothing. The developer has no server that receives your documents, details, logins or usage.</p>
+
+<h2>Updates</h2>
+<p>The app checks GitHub (github.com) for a newer release and, if you agree, downloads it from there.</p>
+
+<h2>Deleting your data</h2>
+<p>Settings › Delete account removes everything from the phone and, if you choose, the backup from your Drive.
+You can also revoke Lararium's access at <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>.</p>
+
+<h2>Contact</h2>
+<p>Questions: open an issue at <a href="https://github.com/arnablahiry/family-docs/issues">github.com/arnablahiry/family-docs/issues</a>.</p>
+</main></body></html>
