@@ -179,9 +179,11 @@ fun MemberScreen(memberId: String, onBack: () -> Unit, onEdit: () -> Unit, onPas
                     } }
                 }
             }
+            // Logins are private: another member's never leave their phone, and nobody (admins included) sees or adds them here.
+            val ownLogins = m.origin == null
             when (settings.vaultView) {
                 VaultView.CARDS -> {
-                    item { PasswordsCard(passwords.size, onPasswords) }
+                    if (ownLogins) item { PasswordsCard(passwords.size, onPasswords) }
                     item {
                         FdWalletStack(
                             shown, if (m.shared) "Family" else m.name, expanded,
@@ -189,7 +191,7 @@ fun MemberScreen(memberId: String, onBack: () -> Unit, onEdit: () -> Unit, onPas
                                 expanded = id
                                 if (id != null)
                                 // bring the lifted card near the top (the stack is item 4, or 5 when the country pills show)
-                                scope.launch { list.animateScrollToItem(if (codes.size > 1) 5 else 4, (topPx - 120).toInt().coerceAtLeast(0)) }
+                                scope.launch { list.animateScrollToItem((if (codes.size > 1) 5 else 4) - (if (ownLogins) 0 else 1), (topPx - 120).toInt().coerceAtLeast(0)) }
                             },
                             onOpen = open,
                             modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp),
@@ -207,17 +209,17 @@ fun MemberScreen(memberId: String, onBack: () -> Unit, onEdit: () -> Unit, onPas
                 }
                 VaultView.LIST -> item {
                     FdList(Modifier.padding(bottom = 10.dp)) {
-                        FdListItem("Passwords", "${passwords.size} saved logins", first = true, onClick = onPasswords,
+                        if (ownLogins) FdListItem("Passwords", "${passwords.size} saved logins", first = true, onClick = onPasswords,
                             leading = { FdDocTile("Passwords", 42.dp, iconOverride = "key", hueOverride = PASSWORD_HUE) })
-                        shown.forEach { d ->
-                            FdListItem(d.name, d.tail(), onClick = { open(d) }, leading = { FdDocIcon(d, 42.dp) },
+                        shown.forEachIndexed { i, d ->
+                            FdListItem(d.name, d.tail(), first = !ownLogins && i == 0, onClick = { open(d) }, leading = { FdDocIcon(d, 42.dp) },
                                 extraLines = listOfNotNull(d.validUntil()?.let { "Valid until $it" }),
                                 trailing = { FdFlag(d.issuer, 20.dp); FdIcon("chev", 18.dp, tint = c.muted) }, chevron = false)
                         }
                     }
                 }
                 VaultView.ICONS -> item {
-                    val tiles: List<DocumentEntity?> = listOf(null) + shown
+                    val tiles: List<DocumentEntity?> = (if (ownLogins) listOf<DocumentEntity?>(null) else emptyList()) + shown
                     Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         tiles.chunked(3).forEach { row ->
                             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {

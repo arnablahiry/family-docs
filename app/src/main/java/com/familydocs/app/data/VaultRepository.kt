@@ -250,6 +250,8 @@ class VaultRepository(private val dao: VaultDao, val files: FileStore) {
     }
 
     suspend fun savePassword(memberId: String, site: String, user: String, pass: String, id: String? = null) {
+        // logins are private to their owner: none can be added to another member's vault, not even by an admin
+        require(dao.memberNow(memberId)?.origin == null) { "Logins are private: only they can save their own" }
         dao.upsertPassword(PasswordEntity(id ?: UUID.randomUUID().toString(), memberId, site, user, pass))
         onChanged()
     }

@@ -40,6 +40,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -102,6 +104,10 @@ fun PasswordsScreen(memberId: String, onBack: () -> Unit) {
     // what to do once the PIN is entered (or set up)
     var pinFor by remember { mutableStateOf<(() -> Unit)?>(null) }
     var settingPin by remember { mutableStateOf<(() -> Unit)?>(null) }
+
+    // One passwords PIN per phone, for every login you can see (yours, Common's, anyone's). The first time a
+    // passwords page has logins and there's no PIN yet (say someone added a Common login and it just synced), set it.
+    LaunchedEffect(items.isNotEmpty()) { if (items.isNotEmpty() && !app.pwPin.isSet && settingPin == null) settingPin = {} }
 
     fun withPin(then: () -> Unit) {
         when {
@@ -217,11 +223,21 @@ private fun PwCard(p: PasswordEntity, selected: Boolean, show: Boolean, onTap: (
         AnimatedVisibility(selected, enter = expandVertically(spring(dampingRatio = .86f, stiffness = Spring.StiffnessMediumLow)) + fadeIn(tween(220, 80)),
             exit = shrinkVertically(tween(200)) + fadeOut(tween(120))) {
             Row(Modifier.padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FdButton(if (show) "Hide" else "View", onView, Modifier.weight(1f), BtnKind.Ghost, icon = if (show) "eyeoff" else "eye")
-                FdButton("Copy", onCopy, Modifier.weight(1f), BtnKind.Ghost, icon = "copy")
-                FdButton("Delete", onDelete, Modifier.weight(1f), BtnKind.Ghost, icon = "trash", contentColor = c.danger)
+                ActionKey(if (show) "eyeoff" else "eye", if (show) "Hide password" else "View password", c.fg, onView, Modifier.weight(1f))
+                ActionKey("copy", "Copy password", c.fg, onCopy, Modifier.weight(1f))
+                ActionKey("trash", "Delete login", c.danger, onDelete, Modifier.weight(1f))
             }
         }
+    }
+}
+
+/** An icon-only pill under a lifted login (View, Copy, Delete). */
+@Composable
+private fun ActionKey(icon: String, description: String, tint: androidx.compose.ui.graphics.Color, onClick: () -> Unit, modifier: Modifier) {
+    val c = Fd.c
+    Box(modifier.height(46.dp).clip(RoundedCornerShape(14.dp)).background(c.surface).border(1.dp, c.line, RoundedCornerShape(14.dp))
+        .tap(onClick = onClick).semantics { contentDescription = description }, contentAlignment = Alignment.Center) {
+        FdIcon(icon, 21.dp, tint = tint)
     }
 }
 
@@ -274,7 +290,7 @@ private fun SetPinSheet(pin: PasscodeManager, appPasscode: PasscodeManager, onDo
     FdSheet(onDismiss) {
         Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
             Text(if (first == null) "Set a passwords PIN" else "Enter it again", style = fdText(18f, FontWeight.Bold))
-            Text(msg ?: "Asked before a password is shown or copied. Use a different one from your app passcode.",
+            Text(msg ?: "One PIN for every saved password on this phone (yours, Common's, everyone's), asked before one is shown or copied. Not your app passcode.",
                 style = fdText(13f, color = if (msg != null) c.danger else c.muted), textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp, bottom = 14.dp))
             if (first == null) Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 16.dp)) {
                 listOf(4, 6).forEach { n -> FdChip("$n digits", len == n, { len = n; code = "" }) }
