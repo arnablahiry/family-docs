@@ -289,8 +289,20 @@ private fun GroupHeader(groups: List<com.familydocs.app.data.GroupEntity>, gid: 
     val ring by androidx.compose.animation.animateColorAsState(if (open) c.accent else c.accent.copy(alpha = .55f), tween(200), label = "groupRing")
     Column {
         Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Lararium", style = fdText(27f, color = c.fg, spacing = .02f).copy(fontFamily = com.familydocs.app.ui.ds.Bitcount), modifier = Modifier.weight(1f), maxLines = 1)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            // The name shrinks to whatever room the four buttons leave (narrow phones, large font settings), never cut off.
+            androidx.compose.foundation.layout.BoxWithConstraints(Modifier.weight(1f)) {
+                val measurer = androidx.compose.ui.text.rememberTextMeasurer()
+                val base = fdText(27f, color = c.fg, spacing = .02f).copy(fontFamily = com.familydocs.app.ui.ds.Bitcount)
+                val room = constraints.maxWidth
+                val fitted = remember(room, base) {
+                    var k = 1f
+                    fun at(k: Float) = base.copy(fontSize = base.fontSize * k, letterSpacing = base.letterSpacing * k)
+                    while (k > .5f && measurer.measure("Lararium", at(k), softWrap = false, maxLines = 1).size.width > room) k -= .04f
+                    at(k)
+                }
+                Text("Lararium", style = fitted, maxLines = 1, softWrap = false)
+            }
             ThemeButton()
             FdIconButton("lock", { app.appLock.lock() }, Modifier.border(1.dp, c.line, CircleShape), size = 40.dp, iconSize = 19.dp, background = c.surface, description = "Lock app")
             // the group's picture: rolls to the new group when you switch
