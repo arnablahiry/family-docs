@@ -8,9 +8,12 @@ import java.security.SecureRandom
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
 
-/** Custom 4/6-digit passcode stored as a salted PBKDF2 hash, with escalating lockout after 5 wrong tries. */
-class PasscodeManager(context: Context) {
-    private val prefs = context.getSharedPreferences("passcode", Context.MODE_PRIVATE)
+/**
+ * Custom 4/6-digit passcode stored as a salted PBKDF2 hash, with escalating lockout after 5 wrong tries.
+ * [name] keeps separate codes apart: "passcode" opens the app, "pw_pin" shows saved passwords.
+ */
+class PasscodeManager(context: Context, name: String = "passcode") {
+    private val prefs = context.getSharedPreferences(name, Context.MODE_PRIVATE)
 
     sealed interface Check {
         data object Ok : Check
@@ -55,6 +58,12 @@ class PasscodeManager(context: Context) {
         _isSetFlow.value = true
         onChanged()
     }
+
+    /** Whether [code] is this passcode, without counting a wrong try (to keep a second PIN different from it). */
+    fun matches(code: String): Boolean = isSet && runCatching {
+        val salt = Base64.decode(prefs.getString(SALT, "") ?: "", Base64.NO_WRAP)
+        MessageDigest.isEqual(hash(code, salt), Base64.decode(prefs.getString(HASH, "") ?: "", Base64.NO_WRAP))
+    }.getOrDefault(false)
 
     fun lockoutLeft(): Long {
         val until = prefs.getLong(UNTIL, 0)

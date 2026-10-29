@@ -5,7 +5,7 @@ package com.familydocs.app.domain
  * Order matters: the first matching rule wins ("Vaccination certificate" → vaccine, not certificate).
  * Kept free of Android imports so it can be unit-tested on the JVM.
  */
-enum class DocIcon { HOUSE, BOLT, FINGERPRINT, CARD, PASSPORT, PLANE, RESIDENCE, CAR, BALLOT, SHIELD, SYRINGE, BANK, CAP, CERTIFICATE, MEDICAL, RECEIPT, ID, FILE, KEY, PEOPLE, TICKET, BED, TRAIN }
+enum class DocIcon { HOUSE, BOLT, FINGERPRINT, CARD, PASSPORT, PLANE, VISA, RESIDENCE, CAR, BALLOT, SHIELD, SYRINGE, BANK, CAP, CERTIFICATE, MEDICAL, RECEIPT, ID, FILE, KEY, PEOPLE, TICKET, BED, TRAIN }
 
 data class DocType(
     val key: String,
@@ -31,7 +31,7 @@ object DocTypes {
         Regex("aadh?aa?r|uidai|आधार", I) to DocType("aadhaar", "Aadhaar", DocIcon.FINGERPRINT, 0xFFD9822B),
         Regex("\\bpan\\b|permanent account", I) to DocType("pan", "PAN Card", DocIcon.CARD, 0xFF2F6FB0),
         Regex("passport|διαβατ|pasaporte|reisepass", I) to DocType("passport", "Passport", DocIcon.PASSPORT, 0xFF284A80),
-        Regex("visa|schengen|βίζα|θεώρηση", I) to DocType("visa", "Visa", DocIcon.PLANE, 0xFF7A4FB5),
+        Regex("visa|schengen|βίζα|θεώρηση", I) to DocType("visa", "Visa", DocIcon.VISA, 0xFF7A4FB5),
         Regex("\\brent|lease|tenan|\\bdeed\\b|property|ενοίκ|μίσθωσ", I) to DocType("property", "Rental Agreement", DocIcon.HOUSE, 0xFF6B5B95),
         Regex("\\bbill\\b|electric|utility|wi-?fi|broadband|internet|\\bgas\\b|water|ΔΕΗ", I) to DocType("bill", "Electricity Bill", DocIcon.BOLT, 0xFFC98A12),
         Regex("residen|permit|άδεια|aufenthalt|permesso|\\btrc\\b|\\bbrp\\b|green card|\\boci\\b", I) to DocType("residence", "Residence Permit", DocIcon.RESIDENCE, 0xFF2F7F7A),

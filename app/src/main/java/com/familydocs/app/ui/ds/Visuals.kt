@@ -193,7 +193,7 @@ fun FdFlag(code: String, width: Dp = 22.dp, ring: Color = Color(0x1F000000), gre
 
 fun DocIcon.demoName(): String = when (this) {
     DocIcon.HOUSE -> "house"; DocIcon.BOLT -> "bolt"; DocIcon.FINGERPRINT -> "finger"; DocIcon.CARD -> "card"; DocIcon.PASSPORT -> "passport"
-    DocIcon.PLANE -> "plane"; DocIcon.RESIDENCE -> "homeid"; DocIcon.CAR -> "car"; DocIcon.BALLOT -> "ballot"; DocIcon.SHIELD -> "shield"
+    DocIcon.PLANE -> "plane"; DocIcon.VISA -> "visa"; DocIcon.RESIDENCE -> "homeid"; DocIcon.CAR -> "car"; DocIcon.BALLOT -> "ballot"; DocIcon.SHIELD -> "shield"
     DocIcon.SYRINGE -> "syringe"; DocIcon.BANK -> "bank"; DocIcon.CAP -> "cap"; DocIcon.CERTIFICATE -> "cert"; DocIcon.MEDICAL -> "medical"
     DocIcon.RECEIPT -> "receipt"; DocIcon.ID -> "idcard"; DocIcon.FILE -> "file"; DocIcon.KEY -> "key"; DocIcon.PEOPLE -> "people"
     DocIcon.TICKET -> "ticket"; DocIcon.BED -> "bed"; DocIcon.TRAIN -> "train"

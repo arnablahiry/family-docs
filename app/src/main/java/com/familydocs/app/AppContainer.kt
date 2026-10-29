@@ -30,6 +30,8 @@ class AppContainer(context: Context) {
         }
     }
     val passcode = PasscodeManager(app).also { p -> p.onChanged = { if (settings.value.backupEnabled) BackupWorker.soon(app) } }
+    /** A second PIN, only for showing or copying saved passwords (set with the first login you save). */
+    val pwPin = PasscodeManager(app, "pw_pin")
     val settings = SettingsStore(app)
     val appLock = AppLock(settings)
     val textReader = TextReader()
@@ -72,6 +74,7 @@ class AppContainer(context: Context) {
         repo.wipe()
         settings.reset()
         repo.groupId.value = null
+        pwPin.clear()
         passcode.clear() // last: this is what switches the app back to the welcome screen
     }
 }

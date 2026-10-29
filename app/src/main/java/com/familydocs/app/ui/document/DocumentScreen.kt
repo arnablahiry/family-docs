@@ -1,5 +1,7 @@
 package com.familydocs.app.ui.document
 
+import kotlin.math.roundToInt
+import androidx.compose.ui.layout.layout
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.pager.HorizontalPager
@@ -146,8 +148,19 @@ fun DocumentScreen(docId: String, onBack: () -> Unit, onEdit: (memberId: String)
                 val pager = rememberPagerState { pages.size }
                 Box(Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp).fillMaxWidth().clip(RoundedCornerShape(18.dp)).border(1.dp, c.line, RoundedCornerShape(18.dp))
                     .background(c.surface2)) {
-                    HorizontalPager(pager, Modifier.fillMaxWidth()) { i ->
-                        Image(pages[i], "${d.name}, page ${i + 1}", Modifier.fillMaxWidth().clickable { zoomed = true }, contentScale = ContentScale.FillWidth)
+                    // Pages of different shapes: the box's height follows your finger from one page's shape to the next
+                    // (worked out in the layout step from the swipe position, so it's smooth and costs no recomposition).
+                    HorizontalPager(pager, Modifier.fillMaxWidth().layout { m, cons ->
+                        val w = cons.maxWidth
+                        fun hOf(i: Int): Float = pages.getOrNull(i)?.let { minOf(w * it.height.toFloat() / it.width.coerceAtLeast(1), w * 1.45f) } ?: w.toFloat()
+                        val off = pager.currentPageOffsetFraction
+                        val from = pager.currentPage
+                        val to = (if (off > 0) from + 1 else from - 1).coerceIn(0, pages.lastIndex)
+                        val h = (hOf(from) + (hOf(to) - hOf(from)) * kotlin.math.abs(off)).roundToInt().coerceAtLeast(1)
+                        val p = m.measure(cons.copy(minHeight = h, maxHeight = h))
+                        layout(p.width, h) { p.place(0, 0) }
+                    }) { i ->
+                        Image(pages[i], "${d.name}, page ${i + 1}", Modifier.fillMaxSize().clickable { zoomed = true }, contentScale = ContentScale.Fit)
                     }
                     Box(Modifier.align(Alignment.BottomEnd).padding(10.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xB30A0E18)).padding(horizontal = 9.dp, vertical = 5.dp)) {
                         Text(if (pages.size > 1) "${pager.currentPage + 1} / ${pages.size} · swipe · tap to zoom" else "Tap to zoom", style = fdText(11f, color = Color.White))

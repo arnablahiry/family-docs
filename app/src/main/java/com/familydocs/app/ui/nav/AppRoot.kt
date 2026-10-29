@@ -6,6 +6,8 @@ import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -49,15 +51,18 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-// The demo's screen change: the new screen slides in 24px and fades up from 20% (.28s, cubic-bezier(.2,.8,.2,1));
-// going back it comes from the other side. The old screen is simply replaced.
-private const val SLIDE_MS = 280
+// Screen changes glide on one axis: forward, the new screen comes in from the right while the old one drifts a little
+// left and fades; back, the reverse (and with the back gesture, it follows your finger before you let go).
+private const val NAV_MS = 380
+private fun <T> glide() = tween<T>(NAV_MS, easing = FdEase)
 fun AnimatedContentTransitionScope<NavBackStackEntry>.fdEnter(): EnterTransition =
-    slideInHorizontally(tween(SLIDE_MS, easing = FdEase)) { (24 * it / 390f).toInt().coerceAtLeast(24) } + fadeIn(tween(SLIDE_MS, easing = FdEase), initialAlpha = .2f)
+    slideInHorizontally(glide()) { it / 4 } + fadeIn(tween(240, delayMillis = 70))
+fun AnimatedContentTransitionScope<NavBackStackEntry>.fdExit(): ExitTransition =
+    slideOutHorizontally(glide()) { -it / 10 } + fadeOut(tween(200))
 fun AnimatedContentTransitionScope<NavBackStackEntry>.fdPopEnter(): EnterTransition =
-    slideInHorizontally(tween(SLIDE_MS, easing = FdEase)) { -(24 * it / 390f).toInt().coerceAtLeast(24) } + fadeIn(tween(SLIDE_MS, easing = FdEase), initialAlpha = .2f)
-@Suppress("UnusedReceiverParameter")
-fun AnimatedContentTransitionScope<NavBackStackEntry>.fdExit(): ExitTransition = ExitTransition.None
+    slideInHorizontally(glide()) { -it / 10 } + fadeIn(tween(240, delayMillis = 70))
+fun AnimatedContentTransitionScope<NavBackStackEntry>.fdPopExit(): ExitTransition =
+    slideOutHorizontally(glide()) { it / 4 } + fadeOut(tween(200))
 
 /** Onboarding until an account + passcode exist; afterwards the vault, with the lock screen drawn on top while locked. */
 @Composable
@@ -94,7 +99,7 @@ private fun VaultNav() {
     val box = cropBoxPx()
 
     NavHost(nav, startDestination = "home", enterTransition = { fdEnter() }, exitTransition = { fdExit() },
-        popEnterTransition = { fdPopEnter() }, popExitTransition = { fdExit() }) {
+        popEnterTransition = { fdPopEnter() }, popExitTransition = { fdPopExit() }) {
         composable("home") {
             FamilyScreen(
                 onMember = { nav.navigate("member/$it") },

@@ -74,6 +74,7 @@ import com.familydocs.app.ui.ds.tap
 import com.familydocs.app.ui.nav.fdEnter
 import com.familydocs.app.ui.nav.fdExit
 import com.familydocs.app.ui.nav.fdPopEnter
+import com.familydocs.app.ui.nav.fdPopExit
 import com.familydocs.app.ui.security.PasscodeSetupScreen
 
 @Composable
@@ -85,7 +86,7 @@ fun OnboardingFlow(onDone: () -> Unit) {
     val context = LocalContext.current
     val box = cropBoxPx()
     NavHost(nav, startDestination = "welcome", enterTransition = { fdEnter() }, exitTransition = { fdExit() },
-        popEnterTransition = { fdPopEnter() }, popExitTransition = { fdExit() }) {
+        popEnterTransition = { fdPopEnter() }, popExitTransition = { fdPopExit() }) {
         composable("welcome") { WelcomeScreen(onStart = { nav.navigate("register") }, onSignIn = { nav.navigate("signin") }) }
         composable("register") {
             RegisterScreen(vm, onBack = { nav.popBackStack() }, onRestoreInstead = { nav.navigate("signin") }) { nav.navigate("passcode") }
