@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -125,7 +126,10 @@ fun CardScene(key: String, hue: Long, country: String?, modifier: Modifier = Mod
             fun Y(y: Float) = dy + y * k
             drawPath(hill(0, ::X, ::Y), p[2])
         }
-        if (motif != null) Image(painterResource(motif), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        // A passport card has its dates and machine-readable lines lower down: its booklet sits higher and a bit smaller.
+        if (motif != null) Image(painterResource(motif), null, Modifier.fillMaxSize().then(if (key == "passport") Modifier.graphicsLayer {
+            transformOrigin = androidx.compose.ui.graphics.TransformOrigin(124f / 160f, 63f / 101f); scaleX = .8f; scaleY = .8f; translationY = -size.height * .08f
+        } else Modifier), contentScale = ContentScale.Crop)
         Canvas(Modifier.fillMaxSize()) {
             val k = maxOf(size.width / 160f, size.height / 101f)
             val dx = (size.width - 160f * k) / 2f; val dy = (size.height - 101f * k) / 2f

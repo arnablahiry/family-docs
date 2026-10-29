@@ -59,6 +59,8 @@ jobs:
           if [ -z "$VN" ]; then VN=$(grep '^familydocs.versionName' gradle.properties | cut -d= -f2); fi
           echo "VN=$VN" >> $GITHUB_ENV
           cp app/build/outputs/apk/release/app-release.apk "Lararium-$VN.apk"
+          # the same file under a fixed name: .../releases/latest/download/Lararium.apk is always the newest one
+          cp app/build/outputs/apk/release/app-release.apk Lararium.apk
       - uses: actions/upload-artifact@v4
         with:
           name: Lararium-release-apk
@@ -68,5 +70,7 @@ jobs:
         with:
           tag_name: v${{ env.VN }}-build${{ github.run_number }}
           name: Lararium ${{ env.VN }} (build ${{ github.run_number }})
-          files: Lararium-*.apk
+          files: |
+            Lararium-*.apk
+            Lararium.apk
           body: Signed release APK. On the phone, open this page, download the .apk and tap it. If Lararium is already installed it updates in place and keeps everything.

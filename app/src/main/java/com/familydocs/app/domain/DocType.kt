@@ -96,7 +96,7 @@ object DocTypes {
     fun flagByDefault(name: String) = forName(name).key in FLAG_TYPES
 
     /** National ID cards: these show the issuing country's flag faintly behind the card art unless turned off. */
-    val FLAG_TYPES = setOf("aadhaar", "visa", "residence", "id", "pan", "voter", "social", "tax", "afmamka")
+    val FLAG_TYPES = setOf("passport", "aadhaar", "visa", "residence", "id", "pan", "voter", "social", "tax", "afmamka")
 
     fun forName(name: String): DocType {
         val n = name.trim()
