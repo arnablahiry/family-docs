@@ -51,7 +51,11 @@ class DriveBackup(
     private val repo: VaultRepository,
     private val files: FileStore,
     val keys: BackupKeyStore,
+    private val passcode: com.familydocs.app.security.PasscodeManager? = null,
 ) {
+    /** The passcode check found by the last [restore] (sealed in the backup), so signing in again keeps your passcode. */
+    var restoredPasscode: String? = null; private set
+
     /** Same grant as "Continue with Google"; if the result has a resolution, the UI must launch it once. */
     suspend fun authorize(): AuthorizationResult =
         Identity.getAuthorizationClient(context).authorize(com.familydocs.app.auth.GoogleAccountHelper(context).request()).await()
@@ -87,6 +91,7 @@ class DriveBackup(
         val drive = DriveClient(accessToken)
         drive.findByProp(P_ROOT, "1")?.let { drive.delete(it.id) }
         drive.appDataDelete(KEY_FILE)
+        drive.appDataDelete(PASSCODE_FILE)
     }
 
     data class Report(val uploaded: Int, val unchanged: Int, val removed: Int)
@@ -123,6 +128,8 @@ class DriveBackup(
         val seen = mutableMapOf<String, String>()
         /** true when [k] is unchanged since the last backup (and this isn't the weekly full check); remembers [v] either way */
         fun same(k: String, v: String): Boolean { seen[k] = v; return !full && manifest.getString(k, null) == v }
+        // Your passcode check (salt + hash, sealed), in the hidden app folder: signing in on any phone keeps the same passcode.
+        passcode?.export()?.let { pc -> if (!same("passcode", sha(pc))) drive.appDataWrite(PASSCODE_FILE, seal(pc.toByteArray())) }
 
         // My Drive › Lararium › <your folder> (your documents are in every group) and one folder per group
         // (Family, Flatmates…) holding that group's people. Existing folders are moved in, not uploaded again.
@@ -261,6 +268,7 @@ class DriveBackup(
         val key = k.key
         val index = JSONObject(String(BackupCrypto.open(drive.download(indexFile.id), key)))
         fun open(b: ByteArray): ByteArray = BackupCrypto.open(b, key)
+        restoredPasscode = runCatching { drive.appDataRead(PASSCODE_FILE)?.let { String(open(it)) } }.getOrNull()
 
         val blobs = mutableMapOf<String, ByteArray>()
         val members = index.getJSONArray("members").let { a -> (0 until a.length()).map { a.getJSONObject(it) } }
@@ -385,6 +393,7 @@ class DriveBackup(
     companion object {
         /** drive.file: non-sensitive scope, no Google verification screen, and the app can't see the rest of the user's Drive. */
         const val KEY_FILE = "family-docs-backup-key.json"
+        const val PASSCODE_FILE = "lararium-passcode.fdenc"
         private const val OCTET = "application/octet-stream"
         // label keys (Drive appProperties)
         const val P_ROOT = "fd_root"; const val P_GROUP = "fd_group"; const val P_MEMBER = "fd_member"; const val P_MEMBER_OF = "fd_member_of"; const val P_DOC = "fd_doc"

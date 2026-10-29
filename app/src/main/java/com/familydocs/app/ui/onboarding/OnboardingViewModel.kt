@@ -58,6 +58,8 @@ class OnboardingViewModel(private val c: AppContainer) : ViewModel() {
     var restoreError by mutableStateOf<String?>(null); private set
     /** The vault came from Drive, so finishing only sets this phone's passcode. */
     var restored by mutableStateOf(false); private set
+    /** The backup has your passcode: signing in again keeps it (no new passcode to set). */
+    val keepsPasscode: Boolean get() = restored && c.backup.restoredPasscode != null
 
     init {
         viewModelScope.launch {
@@ -154,8 +156,13 @@ class OnboardingViewModel(private val c: AppContainer) : ViewModel() {
     fun finish(biometric: Boolean?, cropBoxPx: Float, onDone: () -> Unit) = viewModelScope.launch {
         busy = true
         if (restored) {
-            pendingPasscode?.let { code -> withContext(Dispatchers.Default) { c.passcode.set(code) } }
             if (biometric != null) c.settings.update { it.copy(biometric = biometric) }
+            val kept = pendingPasscode == null && c.backup.restoredPasscode?.let { c.passcode.import(it) } == true
+            if (kept) {
+                // Same passcode as before: the vault opens on the lock screen and you unlock with it.
+                c.appLock.lock(); busy = false; onDone(); return@launch
+            }
+            pendingPasscode?.let { code -> withContext(Dispatchers.Default) { c.passcode.set(code) } }
             c.appLock.unlock(); busy = false; onDone(); return@launch
         }
         // Joining with an invite someone sent: the group is theirs (read from their encrypted share), set up after the account.

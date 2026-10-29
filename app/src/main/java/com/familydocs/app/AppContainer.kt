@@ -28,7 +28,7 @@ class AppContainer(context: Context) {
             r.groupId.value = settings.value.currentGroup
         }
     }
-    val passcode = PasscodeManager(app)
+    val passcode = PasscodeManager(app).also { p -> p.onChanged = { if (settings.value.backupEnabled) BackupWorker.soon(app) } }
     val settings = SettingsStore(app)
     val appLock = AppLock(settings)
     val textReader = TextReader()
@@ -37,7 +37,7 @@ class AppContainer(context: Context) {
     val appScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main.immediate)
     /** In-app updates from the GitHub releases (checked at app start; Settings › About shows and installs them). */
     val updater = com.familydocs.app.update.AppUpdater(app)
-    val backup: DriveBackup by lazy { DriveBackup(app, repo, files, BackupKeyStore(app, crypto)) }
+    val backup: DriveBackup by lazy { DriveBackup(app, repo, files, BackupKeyStore(app, crypto), passcode) }
     /** Groups shared between accounts (encrypted shares in each member's Drive). */
     val share: com.familydocs.app.backup.GroupShare by lazy { com.familydocs.app.backup.GroupShare(app, db.dao(), files) }
     /** Asking to join a group with just its code; members approve in the app (needs the Firebase settings at build time). */

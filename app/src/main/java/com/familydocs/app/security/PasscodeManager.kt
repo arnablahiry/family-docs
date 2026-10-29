@@ -23,6 +23,22 @@ class PasscodeManager(context: Context) {
     /** Emits whenever a passcode is set or cleared (the app switches between onboarding and the vault on it). */
     val isSetFlow: kotlinx.coroutines.flow.StateFlow<Boolean> = _isSetFlow
 
+    /** Called after the passcode changes (the backup keeps a sealed copy, so signing in again keeps the same one). */
+    var onChanged: () -> Unit = {}
+
+    /** The stored passcode check (salt + PBKDF2 hash + length; never the passcode itself), for the encrypted backup. */
+    fun export(): String? = if (!isSet) null else org.json.JSONObject().put("v", 1).put("salt", prefs.getString(SALT, "")).put("hash", prefs.getString(HASH, ""))
+        .put("len", length).toString()
+
+    /** Puts back the passcode check from a backup: after signing in again you unlock with the same passcode as before. */
+    fun import(json: String): Boolean = runCatching {
+        val j = org.json.JSONObject(json)
+        require(j.getString("hash").isNotEmpty() && j.getString("salt").isNotEmpty())
+        prefs.edit().putString(SALT, j.getString("salt")).putString(HASH, j.getString("hash")).putInt(LEN, j.optInt("len", 6))
+            .putInt(FAILS, 0).putLong(UNTIL, 0).commit()
+        _isSetFlow.value = true
+    }.isSuccess
+
     /** Removes the passcode from this phone (sign out / delete account). */
     fun clear() { prefs.edit().clear().commit(); _isSetFlow.value = false }
     val length: Int get() = prefs.getInt(LEN, 6)
@@ -37,6 +53,7 @@ class PasscodeManager(context: Context) {
             .putInt(FAILS, 0).putLong(UNTIL, 0)
             .commit()
         _isSetFlow.value = true
+        onChanged()
     }
 
     fun lockoutLeft(): Long {

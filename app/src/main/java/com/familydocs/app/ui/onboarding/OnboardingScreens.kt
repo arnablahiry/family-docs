@@ -92,7 +92,8 @@ fun OnboardingFlow(onDone: () -> Unit) {
         }
         composable("signin") {
             SignInScreen(vm, onBack = { nav.popBackStack() }, onCreate = { nav.navigate("register") { popUpTo("welcome") } }) {
-                nav.navigate("passcode") { popUpTo("welcome") }
+                // Your passcode came back with the backup: straight to the lock screen, unlock with the same passcode.
+                if (vm.keepsPasscode) vm.finish(null, box, onDone) else nav.navigate("passcode") { popUpTo("welcome") }
             }
         }
         composable("passcode") {
