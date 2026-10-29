@@ -167,6 +167,11 @@ private fun GroupHome(g: String?, onMember: (String) -> Unit, onSettings: () -> 
     val counts by app.repo.documentCounts.collectAsStateWithLifecycle(emptyList())
     val allEvents by remember(g) { app.repo.eventsOf(g) }.collectAsStateWithLifecycle(emptyList())
     var query by rememberSaveable { mutableStateOf("") }
+    // Searching: a back arrow in the box (and the back gesture) clears the search and returns to the home page.
+    val focus = androidx.compose.ui.platform.LocalFocusManager.current
+    val searching = query.isNotBlank()
+    fun endSearch() { query = ""; focus.clearFocus() }
+    androidx.activity.compose.BackHandler(enabled = searching) { endSearch() }
     val self = members.firstOrNull { it.isSelf }
     val events = allEvents.filter { it.visibleTo(self?.id) && Events.isCurrent(it.startDay, it.endDay) }
     val full = GridItemSpan(2)
@@ -178,7 +183,8 @@ private fun GroupHome(g: String?, onMember: (String) -> Unit, onSettings: () -> 
         item(span = { full }) {
             Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp)) {
                 Text("${greeting()}, ${account?.name?.substringBefore(' ').orEmpty()}", style = fdText(14f, color = c.muted))
-                FdInput(query, { query = it }, Modifier.padding(top = 14.dp), placeholder = "Search documents, numbers…", icon = "search")
+                FdInput(query, { query = it }, Modifier.padding(top = 14.dp), placeholder = "Search documents, numbers…", icon = if (searching) null else "search",
+                    leading = if (searching) { { FdIconButton("back", ::endSearch, size = 30.dp, iconSize = 20.dp, description = "Back to home") } } else null)
                 // A newer version on GitHub: a quiet hint that opens Settings at the update; while it downloads (it keeps
                 // going if you come back here), the same box shows the progress.
                 val update by app.updater.state.collectAsStateWithLifecycle()
