@@ -9,6 +9,7 @@ import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
@@ -48,38 +49,83 @@ class AppUpdater(private val context: Context) {
             newer(r.version, currentVersion) -> State.Available(r)
             else -> State.UpToDate
         }
+        // a download that was going when the app closed carries on here
+        if (r != null && _state.value is State.Available) own.launch { resume(r) }
     }
 
     /**
-     * Downloads the APK (progress in [state]) and opens the installer; asks for the install permission first if needed.
-     * Run it in a scope that outlives the screen (AppContainer.appScope), so leaving Settings doesn't stop it.
+     * Downloads the APK with Android's download manager, so it keeps going (with a notification) when Lararium is in
+     * the background or the screen is off; progress in [state]; then opens the installer. Asks for the install
+     * permission first if needed. Run it in a scope that outlives the screen (AppContainer.appScope).
      */
     suspend fun downloadAndInstall(r: Release) {
         if (!canInstall()) { askInstallPermission(); return }
+        if (_state.value is State.Downloading) return
         _state.value = State.Downloading(r, 0f)
-        val file = runCatching {
+        val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
+        val file = apkFile(r)
+        val id = runCatching {
             withContext(Dispatchers.IO) {
-                val dir = File(context.cacheDir, "updates").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
-                val out = File(dir, "Lararium-${r.version}.apk")
-                val c = (URL(r.apkUrl).openConnection() as HttpURLConnection).apply { connectTimeout = 15_000; readTimeout = 30_000; instanceFollowRedirects = true }
-                val total = c.contentLengthLong.takeIf { it > 0 } ?: r.bytes
-                c.inputStream.use { input ->
-                    out.outputStream().use { o ->
-                        val buf = ByteArray(64 * 1024); var done = 0L; var n: Int; var pct = 0
-                        while (input.read(buf).also { n = it } >= 0) {
-                            o.write(buf, 0, n); done += n
-                            // one update per whole percent (the screens redraw for each)
-                            val now = if (total > 0) (done * 100 / total).toInt().coerceIn(0, 100) else 0
-                            if (now != pct) { pct = now; _state.value = State.Downloading(r, now / 100f) }
-                        }
-                    }
-                }
-                out
+                // an earlier download of the same version that finished: install it straight away
+                if (file.exists() && r.bytes > 0 && file.length() == r.bytes) return@withContext -1L
+                prefs.getLong(KEY_ID, -1L).takeIf { it >= 0 }?.let { old -> runCatching { dm.remove(old) } }
+                file.parentFile?.listFiles()?.forEach { it.delete() }
+                dm.enqueue(android.app.DownloadManager.Request(Uri.parse(r.apkUrl))
+                    .setTitle("Lararium ${r.version}").setDescription("Update")
+                    .setMimeType("application/vnd.android.package-archive")
+                    .setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE)
+                    .setDestinationInExternalFilesDir(context, android.os.Environment.DIRECTORY_DOWNLOADS, file.name))
+                    .also { prefs.edit().putLong(KEY_ID, it).putString(KEY_VERSION, r.version).apply() }
             }
-        }.getOrElse { _state.value = State.Failed("Couldn't download the update. Check the connection and try again."); return }
+        }.getOrElse { _state.value = State.Failed("Couldn't start the download. Check the connection and try again."); return }
+        if (id >= 0 && !follow(dm, id, r)) return
         _state.value = State.Available(r)
-        install(file)
+        runCatching { install(file) }.onFailure { _state.value = State.Failed("Downloaded, but the installer didn't open. Tap to try again.") }
     }
+
+    /** Watches download [id] until it's done; true when the file is complete. */
+    private suspend fun follow(dm: android.app.DownloadManager, id: Long, r: Release): Boolean {
+        while (true) {
+            val (status, done, total, reason) = withContext(Dispatchers.IO) {
+                dm.query(android.app.DownloadManager.Query().setFilterById(id))?.use { c ->
+                    if (!c.moveToFirst()) null
+                    else listOf(
+                        c.getLong(c.getColumnIndexOrThrow(android.app.DownloadManager.COLUMN_STATUS)),
+                        c.getLong(c.getColumnIndexOrThrow(android.app.DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)),
+                        c.getLong(c.getColumnIndexOrThrow(android.app.DownloadManager.COLUMN_TOTAL_SIZE_BYTES)),
+                        c.getLong(c.getColumnIndexOrThrow(android.app.DownloadManager.COLUMN_REASON)),
+                    )
+                } ?: listOf(android.app.DownloadManager.STATUS_FAILED.toLong(), 0L, 0L, 0L)
+            }
+            when (status.toInt()) {
+                android.app.DownloadManager.STATUS_SUCCESSFUL -> return true
+                android.app.DownloadManager.STATUS_FAILED -> {
+                    _state.value = State.Failed("Couldn't download the update (${reason}). Check the connection and try again.")
+                    return false
+                }
+                else -> {
+                    val t = if (total > 0) total else r.bytes
+                    val p = if (t > 0) (done * 100 / t).toInt().coerceIn(0, 100) / 100f else 0f
+                    if ((_state.value as? State.Downloading)?.progress != p) _state.value = State.Downloading(r, p)
+                }
+            }
+            kotlinx.coroutines.delay(400)
+        }
+    }
+
+    /** After the app was closed mid-download: pick the download up again (or install it if it finished meanwhile). */
+    suspend fun resume(r: Release) {
+        val id = prefs.getLong(KEY_ID, -1L)
+        if (id < 0 || prefs.getString(KEY_VERSION, null) != r.version || _state.value is State.Downloading) return
+        val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
+        _state.value = State.Downloading(r, 0f)
+        if (follow(dm, id, r)) _state.value = State.Available(r) // finished: tapping Update installs it (no download)
+    }
+
+    private val prefs = context.getSharedPreferences("updater", Context.MODE_PRIVATE)
+    /** Its own scope for following a download, so no screen closing stops it. */
+    private val own = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Main)
+    private fun apkFile(r: Release) = File(context.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS) ?: File(context.filesDir, "updates"), "Lararium-${r.version}.apk")
 
     fun canInstall(): Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.O || context.packageManager.canRequestPackageInstalls()
 
@@ -110,6 +156,7 @@ class AppUpdater(private val context: Context) {
     companion object {
         const val REPO = "arnablahiry/lararium"
         private val VERSION = Regex("\\d+\\.\\d+\\.\\d+")
+        private const val KEY_ID = "download_id"; private const val KEY_VERSION = "download_version"
 
         /** "0.5.10" > "0.5.9" */
         fun newer(a: String, b: String): Boolean {

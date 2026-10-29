@@ -392,7 +392,7 @@ private fun UpdateRow(updater: com.familydocs.app.update.AppUpdater, beforeLeavi
                 icon = "cloud", onClick = { beforeLeavingApp(); appScope.launch { updater.downloadAndInstall(st.release) } })
         }
         is com.familydocs.app.update.AppUpdater.State.Downloading ->
-            FdListItem("Downloading ${st.release.version}…", "${(st.progress * 100).toInt()}% · you can go back, it keeps going; the installer opens when it's done", icon = "cloud")
+            FdListItem("Downloading ${st.release.version}…", "${(st.progress * 100).toInt()}% · keeps going in the background (see the notification); the installer opens when it's done", icon = "cloud")
         com.familydocs.app.update.AppUpdater.State.Checking -> FdListItem("Checking for updates…", null, icon = "refresh")
         com.familydocs.app.update.AppUpdater.State.UpToDate -> FdListItem("Up to date", "You have the latest version", icon = "check",
             onClick = { scope.launch { updater.check() } }, chevron = false)
