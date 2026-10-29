@@ -40,9 +40,11 @@ class AppContainer(context: Context) {
     val appScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main.immediate)
     /** In-app updates from the GitHub releases (checked at app start; Settings › About shows and installs them). */
     val updater = com.familydocs.app.update.AppUpdater(app)
-    val backup: DriveBackup by lazy { DriveBackup(app, repo, files, BackupKeyStore(app, crypto), passcode) }
+    /** Optional backup password for logins (Settings › Backup). */
+    val loginLock = com.familydocs.app.backup.LoginLock(app, crypto).also { l -> l.onChanged = { if (settings.value.backupEnabled) BackupWorker.soon(app) } }
+    val backup: DriveBackup by lazy { DriveBackup(app, repo, files, BackupKeyStore(app, crypto), passcode, loginLock) }
     /** Groups shared between accounts (encrypted shares in each member's Drive). */
-    val share: com.familydocs.app.backup.GroupShare by lazy { com.familydocs.app.backup.GroupShare(app, db.dao(), files) }
+    val share: com.familydocs.app.backup.GroupShare by lazy { com.familydocs.app.backup.GroupShare(app, db.dao(), files, crypto) }
     /** Asking to join a group with just its code; members approve in the app (needs the Firebase settings at build time). */
     val requests: com.familydocs.app.backup.JoinRequests by lazy { com.familydocs.app.backup.JoinRequests(app, db.dao(), share) }
 
@@ -75,6 +77,7 @@ class AppContainer(context: Context) {
         settings.reset()
         repo.groupId.value = null
         pwPin.clear()
+        loginLock.clear()
         passcode.clear() // last: this is what switches the app back to the welcome screen
     }
 }

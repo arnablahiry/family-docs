@@ -131,6 +131,13 @@ fun FamilyScreen(onMember: (String) -> Unit, onSettings: () -> Unit, onDocument:
                 com.familydocs.app.ui.ds.FdTextButton("Review", { gid?.let { settingsFor = Triple(it, null, null) } })
             }
         }
+        // Restored on this phone, but the logins are locked with the backup password: ask for it.
+        val loginsWaiting by app.loginLock.waiting.collectAsStateWithLifecycle()
+        var unlocking by remember { mutableStateOf(false) }
+        if (loginsWaiting) FdBanner("lock", "Your logins are locked with your backup password", Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 6.dp)) {
+            com.familydocs.app.ui.ds.FdTextButton("Unlock", { unlocking = true })
+        }
+        if (unlocking) com.familydocs.app.ui.settings.UnlockLoginsSheet { unlocking = false }
         // What a group admin changed in your things (or about you): stays until you close it.
         val notes by app.share.notices.collectAsStateWithLifecycle()
         notes.takeLast(3).reversed().forEach { n ->

@@ -40,7 +40,8 @@ import org.json.JSONObject
  * "op" in the admin's share addressed to that member; their phone applies it to its own vault (telling them who changed
  * what), lists it as applied, and the admin's phone then drops it. Until then the admin sees the change on their phone.
  */
-class GroupShare(private val context: Context, private val dao: VaultDao, private val files: FileStore) : AdminEdits {
+class GroupShare(private val context: Context, private val dao: VaultDao, private val files: FileStore,
+                 private val crypto: com.familydocs.app.security.CryptoManager) : AdminEdits {
     private val prefs = context.getSharedPreferences("group_share", Context.MODE_PRIVATE)
     private val running = Mutex()
 
@@ -194,7 +195,9 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
                     .put("files", JSONArray(d.attachments.mapNotNull { a -> upload(a.id)?.let { JSONObject().put("f", it).put("mime", a.mime) } }))
                     .put("picture", upload(d.pictureFile) ?: JSONObject.NULL)
             }))
-            .put("passwords", JSONArray(pws.map { JSONObject().put("id", it.id).put("site", it.site).put("user", it.username).put("pass", it.password).put("created", it.createdAt) }))
+            // Common logins don't travel under the group code: they're sealed to each member's phone key ("logins" below).
+            .put("passwords", JSONArray())
+            .put("logins", sealedLogins(g, me, pws))
             // Who else you read: someone who joins through you finds the rest of the group from here.
             .put("peers", JSONArray(g.peerList.map { JSONObject().put("key", it.key).put("name", it.name).put("index", it.index) }))
         // admin changes nobody picked up for two months are dropped
@@ -275,9 +278,18 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
         }
 
         val keepPws = mutableSetOf<String>()
-        if (common != null) j.getJSONArray("passwords").forEachObj { w ->
-            val id = prefix + w.getString("id"); keepPws += id
-            dao.upsertPassword(PasswordEntity(id, common.id, w.getString("site"), w.getString("user"), w.getString("pass"), w.optLong("created"), origin = p.key))
+        if (common != null) {
+            suspend fun take(w: JSONObject) {
+                val id = prefix + w.getString("id"); keepPws += id
+                dao.upsertPassword(PasswordEntity(id, common.id, w.getString("site"), w.getString("user"), w.getString("pass"), w.optLong("created"), origin = p.key))
+            }
+            j.optJSONArray("passwords")?.forEachObj { take(it) } // (older apps)
+            j.optJSONObject("logins")?.let { l ->
+                val opened = runCatching { openLogins(l, myKey) }.getOrNull()
+                // not sealed to this phone yet (they haven't read your new key): keep what you had from them
+                if (opened == null) dao.receivedPasswords(p.key, "s:${g.id}:${p.key}:%").forEach { keepPws += it.id }
+                else opened.forEachObj { take(it) }
+            }
         }
         removeFrom(g, p.key, keepDocs + pendingDocs, keepMembers, keepPws)
         cleanup(retired)
@@ -318,12 +330,61 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
         // Their name may have changed, and they may know members you don't yet (not people an admin just removed).
         val now = dao.groupNow(g.id) ?: grp
         val known = now.peerList.associateBy { it.key }.toMutableMap()
-        known[p.key] = p.copy(name = by, at = System.currentTimeMillis(), err = null)
+        known[p.key] = p.copy(name = by, at = System.currentTimeMillis(), err = null, pub = j.optStringOrNull("pub") ?: p.pub)
         val gone = synchronized(prefs) { longMap("handled:${g.id}") }
         j.optJSONArray("peers")?.forEachObj { o -> val pk = o.getString("key")
             if (pk != myKey && pk !in known && System.currentTimeMillis() - (gone[pk] ?: 0L) > REMOVED_QUIET) known[pk] = Peer(pk, o.optString("name"), o.getString("index")) }
         dao.upsertGroup(now.copy(peers = Peer.encode(known.values.toList())))
         return changed
+    }
+
+    // ---------------- Common logins, sealed to each member's phone ----------------
+
+    /**
+     * This phone's key pair for the group's Common logins: the private half never leaves the phone (kept encrypted with
+     * the Android Keystore key), the public half goes in your share. A new phone gets a new pair; the others seal to it
+     * once they've read your share.
+     */
+    private fun deviceKeys(): Pair<String, java.security.PrivateKey> {
+      synchronized(prefs) {
+        val pub = prefs.getString("device_pub", null)
+        val priv = crypto.readSecret("device_ec_priv")
+        if (pub != null && priv != null)
+            return pub to java.security.KeyFactory.getInstance("EC").generatePrivate(java.security.spec.PKCS8EncodedKeySpec(priv))
+        val kp = RequestCrypto.newKeys()
+        crypto.storeSecret("device_ec_priv", kp.private.encoded)
+        val p = RequestCrypto.b64(kp.public.encoded)
+        prefs.edit().putString("device_pub", p).commit()
+        return p to kp.private
+      }
+    }
+    private fun devicePub() = deviceKeys().first
+
+    /**
+     * Your Common logins for the share: sealed with a fresh random key, and that key sealed to each member's phone key
+     * (and yours). Only members whose phones you've read can open them; the group code alone can't. Reused while
+     * nothing changed, so the share isn't rewritten on every sync.
+     */
+    private fun sealedLogins(g: GroupEntity, me: MemberEntity, pws: List<PasswordEntity>): Any {
+        if (pws.isEmpty()) return JSONObject.NULL
+        val plain = JSONArray(pws.map { JSONObject().put("id", it.id).put("site", it.site).put("user", it.username).put("pass", it.password).put("created", it.createdAt) }).toString()
+        val to = (g.peerList.mapNotNull { p -> p.pub?.let { p.key to it } } + (me.id to devicePub())).sortedBy { it.first }
+        val sig = sha(plain + "|" + to.joinToString(",") { "${it.first}:${it.second}" })
+        if (prefs.getString("loginsig:${g.id}", null) == sig) prefs.getString("logins:${g.id}", null)?.let { return JSONObject(it) }
+        val k = ByteArray(32).also { java.security.SecureRandom().nextBytes(it) }
+        val env = JSONObject()
+        to.forEach { (key, pub) -> runCatching { RequestCrypto.sealTo(RequestCrypto.b64(k), RequestCrypto.publicOf(pub)) }.getOrNull()
+            ?.let { (epk, box) -> env.put(key, JSONObject().put("epk", epk).put("box", box)) } }
+        val out = JSONObject().put("box", RequestCrypto.b64(BackupCrypto.seal(plain.toByteArray(), k, GroupInvite.salt(g.id)))).put("to", env)
+        prefs.edit().putString("logins:${g.id}", out.toString()).putString("loginsig:${g.id}", sig).apply()
+        return out
+    }
+
+    /** Opens someone's Common logins with this phone's key; null when they aren't sealed to it (yet). */
+    private fun openLogins(l: JSONObject, myKey: String): JSONArray? {
+        val e = l.optJSONObject("to")?.optJSONObject(myKey) ?: return null
+        val k = RequestCrypto.unb64(RequestCrypto.openFrom(e.getString("epk"), e.getString("box"), deviceKeys().second))
+        return JSONArray(String(BackupCrypto.open(RequestCrypto.unb64(l.getString("box")), k)))
     }
 
     // ---------------- admins ----------------
@@ -435,7 +496,7 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
 
     /** Admin details in a share index: when you got the group, who made it, the admins, and the admin changes. */
     private fun meta(o: JSONObject, g: GroupEntity, me: MemberEntity, upload: ((String?) -> String?)?): JSONObject {
-        o.put("since", g.createdAt).put("creator", g.creator ?: JSONObject.NULL)
+        o.put("since", g.createdAt).put("creator", g.creator ?: JSONObject.NULL).put("pub", devicePub())
             .put("admins", JSONObject().put("keys", JSONArray((g.adminKeys - setOfNotNull(g.creator)).toList())).put("at", g.adminsAt))
             .put("applied", JSONArray(synchronized(prefs) { applied(g.id) }))
         if (g.isAdmin(me.id)) {

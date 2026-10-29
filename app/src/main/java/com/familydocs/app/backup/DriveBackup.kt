@@ -52,6 +52,8 @@ class DriveBackup(
     private val files: FileStore,
     val keys: BackupKeyStore,
     private val passcode: com.familydocs.app.security.PasscodeManager? = null,
+    /** The optional backup password for logins: Passwords files get a second seal only it opens. */
+    val loginLock: LoginLock? = null,
 ) {
     /** The passcode check found by the last [restore] (sealed in the backup), so signing in again keeps your passcode. */
     var restoredPasscode: String? = null; private set
@@ -201,13 +203,20 @@ class DriveBackup(
         }
 
         onProgress("Saving passwords and photos…")
+        // Logins restored on this phone still waiting for the backup password: leave the Passwords files in Drive alone.
+        val loginsWaiting = loginLock?.waitingList()?.isNotEmpty() == true
         s.members.forEach { m ->
             val folder = memberFolders.getValue(m.id)
             val pws = s.passwords.filter { it.memberId == m.id }
             // Passwords are ALWAYS sealed. "Viewable copies" only ever applies to document scans, never to logins or fields.
+            // With a backup password, sealed twice: inside, with the key made from that password.
             val pwJsonText = JSONArray(pws.map { pwJson(it) }).toString()
-            if (!same("pw:${m.id}", sha(pwJsonText))) drive.upsertFile(folder, "Passwords.fdenc", seal(pwJsonText.toByteArray()), OCTET,
-                mapOf(P_KIND to "passwords", P_DOC_FILE to "${m.id}:passwords"), "${pws.size} saved logins, encrypted", P_DOC_FILE)
+            if (!loginsWaiting && !same("pw:${m.id}", sha(pwJsonText + "|" + (loginLock?.stamp() ?: "off")))) {
+                val locked = loginLock?.seal(pwJsonText.toByteArray())
+                val body = locked?.let { JSONObject().put("v", 2).put("locked", android.util.Base64.encodeToString(it, android.util.Base64.NO_WRAP)).toString() } ?: pwJsonText
+                drive.upsertFile(folder, "Passwords.fdenc", seal(body.toByteArray()), OCTET, mapOf(P_KIND to "passwords", P_DOC_FILE to "${m.id}:passwords"),
+                    "${pws.size} saved logins, encrypted" + if (locked != null) " (and locked with your backup password)" else "", P_DOC_FILE)
+            }
             if (!same("photo:${m.id}", m.photoFile ?: "-")) m.photoFile?.let { files.get(it) }?.let { photo ->
                 drive.upsertFile(folder, "photo.jpg.fdenc", seal(photo), OCTET, mapOf(P_KIND to "photo", P_DOC_FILE to "${m.id}:photo"), null, P_DOC_FILE)
             }
@@ -274,6 +283,7 @@ class DriveBackup(
         val blobs = mutableMapOf<String, ByteArray>()
         val members = index.getJSONArray("members").let { a -> (0 until a.length()).map { a.getJSONObject(it) } }
         val docs = mutableListOf<DocumentEntity>(); val pws = mutableListOf<PasswordEntity>(); val memberEntities = mutableListOf<MemberEntity>()
+        val lockedLogins = mutableListOf<Pair<String, ByteArray>>()
         val rootChildren = drive.children(root.id)
         members.forEachIndexed { mi, mj ->
             onProgress("Restoring ${mj.getString("name")} (${mi + 1} of ${members.size})…")
@@ -284,8 +294,11 @@ class DriveBackup(
             inside.firstOrNull { it.props[P_KIND] == "photo" }?.let { f -> photoId = "m-" + mj.getString("id"); blobs[photoId!!] = open(drive.download(f.id)) }
             memberEntities += memberFromJson(mj, photoId)
             inside.firstOrNull { it.props[P_KIND] == "passwords" }?.let { f ->
-                val arr = JSONArray(String(open(drive.download(f.id))))
-                for (i in 0 until arr.length()) pws += pwFromJson(arr.getJSONObject(i))
+                val text = String(open(drive.download(f.id)))
+                // locked with the backup password: kept sealed until it's entered on this phone
+                if (text.trimStart().startsWith("{")) JSONObject(text).optString("locked").takeIf { it.isNotEmpty() }
+                    ?.let { lockedLogins += mj.getString("id") to android.util.Base64.decode(it, android.util.Base64.NO_WRAP) }
+                else { val arr = JSONArray(text); for (i in 0 until arr.length()) pws += pwFromJson(arr.getJSONObject(i)) }
             }
             inside.filter { it.mime == DriveClient.FOLDER && it.props[P_DOC] != null }.forEach { df ->
                 val parts = drive.children(df.id)
@@ -330,6 +343,7 @@ class DriveBackup(
         files.clear()
         blobs.forEach { (id, data) -> files.put(data, id) }
         repo.restore(VaultRepository.Snapshot(account, memberEntities, docs, pws, events, groups))
+        loginLock?.keepWaiting(lockedLogins)
         keys.install(k)
         com.familydocs.app.events.EventReminders.rescheduleAll(context, events)
     }
@@ -361,6 +375,14 @@ class DriveBackup(
         pins = j.optString("pins"), remindDays = j.optInt("remind", -1), notes = j.optString("notes"), createdAt = j.optLong("created"),
         groupId = if (!j.has("group") || j.isNull("group")) null else j.getString("group"),
     )
+
+    /** Brings back logins a restore found locked with the backup password. Throws when [password] is wrong. Returns how many. */
+    suspend fun unlockLogins(password: CharArray): Int = withContext(Dispatchers.Default) {
+        val lock = loginLock ?: return@withContext 0
+        val texts = lock.unlockWaiting(password)
+        val list = texts.flatMap { t -> JSONArray(t).let { a -> (0 until a.length()).map { pwFromJson(a.getJSONObject(it)) } } }
+        repo.putPasswords(list)
+    }
 
     private fun memberJson(m: MemberEntity) = JSONObject().put("id", m.id).put("name", m.name).put("relation", m.relation)
         .put("self", m.isSelf).put("shared", m.shared).put("created", m.createdAt).put("avatar", m.avatar ?: JSONObject.NULL).put("group", m.groupId ?: JSONObject.NULL).put("origin", m.origin ?: JSONObject.NULL)

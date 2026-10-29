@@ -232,6 +232,13 @@ fun SettingsScreen(onBack: () -> Unit, onEditAccount: () -> Unit, onChangePassco
                     if (s.viewableCopies) "Scans also saved unencrypted, so you can open them in Drive" else "Off: everything in Drive is encrypted", icon = "eye", trailing = {
                         FdSwitch(s.viewableCopies, { v -> app.settings.update { it.copy(viewableCopies = v) } }, "Viewable copies in Drive")
                     })
+                // Optional second lock for logins in the backup: a password only you know (never stored or uploaded).
+                val lockOn by app.loginLock.on.collectAsStateWithLifecycle()
+                var lockSheet by remember { mutableStateOf(false) }
+                FdListItem("Backup password for logins",
+                    if (lockOn) "On · your and Common logins in Drive need it to come back" else "Off · logins in Drive are protected by your Google account",
+                    icon = "key", onClick = { lockSheet = true })
+                if (lockSheet) LoginLockSheet { lockSheet = false }
                 FdListItem("Restore from Drive", "Replaces this phone's vault with your Drive backup", icon = "refresh", onClick = { if (busy == null) sheet = "restore" })
             }
 

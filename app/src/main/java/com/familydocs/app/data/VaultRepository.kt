@@ -258,6 +258,14 @@ class VaultRepository(private val dao: VaultDao, val files: FileStore) {
 
     suspend fun deletePassword(id: String) { dao.deletePassword(id); onChanged() }
 
+    /** Logins brought back from a backup (after the backup password was entered). Returns how many were added. */
+    suspend fun putPasswords(list: List<PasswordEntity>): Int = withContext(Dispatchers.IO) {
+        var n = 0
+        list.forEach { p -> if (dao.memberNow(p.memberId) != null) { dao.upsertPassword(p); n++ } }
+        if (n > 0) onChanged()
+        n
+    }
+
     // ---- events ----
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     val events: Flow<List<EventEntity>> = groupId.flatMapLatest { eventsOf(it) }
