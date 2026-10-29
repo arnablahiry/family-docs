@@ -22,9 +22,18 @@ fun rememberGoogleConnect(onResult: (Result<GoogleAccountHelper.Session>) -> Uni
     val scope = rememberCoroutineScope()
     val latest by rememberUpdatedState(onResult)
 
+    // A cached token Google no longer accepts (401: the grant expired, e.g. after 7 days while the OAuth app is in
+    // "Testing", or it was revoked): forget it and go through Google once more instead of failing.
+    val retried = remember { booleanArrayOf(false) }
+    val start = remember { arrayOfNulls<() -> Unit>(1) }
     fun finish(token: String?) {
         if (token == null) { latest(Result.failure(GoogleAccountHelper.Cancelled())); return }
-        scope.launch { latest(runCatching { GoogleAccountHelper.Session(token, app.google.profile(token)) }) }
+        scope.launch {
+            val r = runCatching { GoogleAccountHelper.Session(token, app.google.profile(token)) }
+            if (r.exceptionOrNull() is GoogleAccountHelper.Unauthorized && !retried[0]) { retried[0] = true; app.google.clearToken(token); start[0]?.invoke(); return@launch }
+            retried[0] = false
+            latest(r)
+        }
     }
 
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { r ->
@@ -38,17 +47,16 @@ fun rememberGoogleConnect(onResult: (Result<GoogleAccountHelper.Session>) -> Uni
             }
     }
 
-    return remember(launcher) {
-        {
-            scope.launch {
-                val auth = runCatching { app.google.authorize() }.getOrElse { latest(Result.failure(it)); return@launch }
-                val pending = auth.pendingIntent
-                if (auth.hasResolution() && pending != null) {
-                    app.appLock.expectExternalActivity()
-                    launcher.launch(IntentSenderRequest.Builder(pending.intentSender).build())
-                } else finish(auth.accessToken)
-            }
-            Unit
+    start[0] = {
+        scope.launch {
+            val auth = runCatching { app.google.authorize() }.getOrElse { latest(Result.failure(it)); return@launch }
+            val pending = auth.pendingIntent
+            if (auth.hasResolution() && pending != null) {
+                app.appLock.expectExternalActivity()
+                launcher.launch(IntentSenderRequest.Builder(pending.intentSender).build())
+            } else finish(auth.accessToken)
         }
+        Unit
     }
+    return remember(launcher) { { retried[0] = false; start[0]?.invoke(); Unit } }
 }

@@ -43,6 +43,7 @@ class GoogleAccountHelper(private val appContext: Context) {
         try {
             conn.setRequestProperty("Authorization", "Bearer $token")
             conn.connectTimeout = 10_000; conn.readTimeout = 15_000
+            if (conn.responseCode == 401) throw Unauthorized()
             check(conn.responseCode == 200) { "Google profile ${conn.responseCode}" }
             val j = JSONObject(conn.inputStream.use { it.readBytes() }.decodeToString())
             Profile(j.getString("email"), j.optString("name").ifBlank { null }, j.optString("picture").ifBlank { null })
@@ -95,4 +96,11 @@ class GoogleAccountHelper(private val appContext: Context) {
     }
 
     class Cancelled : Exception("cancelled")
+    /** Google said the access token is no longer valid (expired or revoked grant): drop it and ask again. */
+    class Unauthorized : Exception("Google said the sign-in had expired (401)")
+
+    /** Forgets a cached access token so the next [authorize] gets a fresh one (or asks for consent again). */
+    suspend fun clearToken(token: String) = withContext(Dispatchers.IO) {
+        runCatching { com.google.android.gms.auth.GoogleAuthUtil.clearToken(appContext, token) }
+    }
 }

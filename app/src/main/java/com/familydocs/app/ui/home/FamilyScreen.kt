@@ -232,8 +232,8 @@ private fun ThemeButton() {
     Box(Modifier.onGloballyPositioned { reveal.origin = it.boundsInRoot().center }) {
         FdIconButton(if (dark) "sun" else "moon", {
             scope.launch { reveal.play { app.settings.update { it.copy(theme = if (dark) ThemeMode.LIGHT else ThemeMode.DARK) } } }
-        }, iconSize = 21.dp, description = if (dark) "Switch to light mode" else "Switch to dark mode",
-            modifier = Modifier.graphicsLayer { val v = spin.value; rotationZ = -120f * v; scaleX = 1f - .6f * v; scaleY = 1f - .6f * v; alpha = 1f - v })
+        }, iconSize = 19.dp, size = 40.dp, background = Fd.c.surface, description = if (dark) "Switch to light mode" else "Switch to dark mode",
+            modifier = Modifier.border(1.dp, Fd.c.line, CircleShape).graphicsLayer { val v = spin.value; rotationZ = -120f * v; scaleX = 1f - .6f * v; scaleY = 1f - .6f * v; alpha = 1f - v })
     }
 }
 
@@ -275,19 +275,19 @@ private fun GroupHeader(groups: List<com.familydocs.app.data.GroupEntity>, gid: 
     val ring by androidx.compose.animation.animateColorAsState(if (open) c.accent else c.accent.copy(alpha = .55f), tween(200), label = "groupRing")
     Column {
         Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Lararium", style = fdText(27f, color = c.fg, spacing = .02f).copy(fontFamily = com.familydocs.app.ui.ds.Bitcount), modifier = Modifier.weight(1f), maxLines = 1)
             ThemeButton()
-            FdIconButton("lock", { app.appLock.lock() }, iconSize = 21.dp, description = "Lock app")
+            FdIconButton("lock", { app.appLock.lock() }, Modifier.border(1.dp, c.line, CircleShape), size = 40.dp, iconSize = 19.dp, background = c.surface, description = "Lock app")
             // the group's picture: rolls to the new group when you switch
-            Box(Modifier.size(36.dp).clip(CircleShape).clickable { if (groups.isEmpty()) onCreate() else open = !open }, contentAlignment = Alignment.Center) {
-                if (current == null) Box(Modifier.size(34.dp).dashedBorder(c.line, radius = 17.dp), contentAlignment = Alignment.Center) { FdIcon("plus", 18.dp, tint = c.muted, description = "Add a group") }
+            Box(Modifier.size(40.dp).clip(CircleShape).clickable { if (groups.isEmpty()) onCreate() else open = !open }, contentAlignment = Alignment.Center) {
+                if (current == null) Box(Modifier.size(38.dp).dashedBorder(c.line, radius = 19.dp), contentAlignment = Alignment.Center) { FdIcon("plus", 18.dp, tint = c.muted, description = "Add a group") }
                 else AnimatedContent(current.id, transitionSpec = {
                     (scaleIn(spring(dampingRatio = .55f, stiffness = 420f), initialScale = .6f) + fadeIn(tween(160))) togetherWith (scaleOut(tween(140), targetScale = .7f) + fadeOut(tween(120)))
-                }, label = "groupPic") { _ -> GroupPic(current, 34.dp, Modifier.border(1.5.dp, ring, CircleShape).padding(2.5.dp), description = "Group: ${current.name}") }
+                }, label = "groupPic") { _ -> GroupPic(current, 35.dp, Modifier.border(1.5.dp, ring, CircleShape).padding(2.5.dp), description = "Group: ${current.name}") }
             }
             Box(Modifier.clip(CircleShape).clickable(onClick = onSettings)) {
-                FdAvatar(account?.name ?: "", 34.dp, photoFile = self?.photoFile ?: account?.photoFile, character = self?.avatar)
+                FdAvatar(account?.name ?: "", 40.dp, photoFile = self?.photoFile ?: account?.photoFile, character = self?.avatar)
             }
         }
         AnimatedVisibility(open, enter = expandVertically(spring(dampingRatio = .82f, stiffness = 420f), expandFrom = Alignment.Top) + fadeIn(tween(200)),
