@@ -49,19 +49,51 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
             val g = publish(drive, g0, me)
             g.peerList.forEach { p ->
                 onProgress("Reading ${p.name}'s share…")
-                runCatching { received += read(g, p, me.id) }.onFailure { problems += "${p.name}: ${it.message}" }
+                runCatching { received += read(g, p, me.id) }.onFailure { e ->
+                    problems += "${p.name}: ${e.message}"
+                    // remember why, so Group settings can show it next to their name
+                    dao.groupNow(g.id)?.let { now -> dao.upsertGroup(now.copy(peers = Peer.encode(now.peerList.map { if (it.key == p.key) it.copy(err = e.message ?: "Couldn't read") else it }))) }
+                }
             }
         }
         if (problems.isEmpty()) "Group up to date" + if (received > 0) " · $received new or changed" else ""
         else "Some shares couldn't be read (${problems.joinToString("; ")})"
     } }
 
-    /** The invite for group [groupId] (publishes your share first if it isn't in Drive yet). */
+    /**
+     * The invite for group [groupId]. Quick: the first time it only puts a small index in Drive (your name, no files yet)
+     * so the invite can be sent straight away; your documents follow in the background.
+     */
     suspend fun invite(accessToken: String, groupId: String): GroupInvite = withContext(Dispatchers.IO) {
         val me = dao.selfNow() ?: error("No account on this phone")
         val g0 = dao.groupNow(groupId) ?: error("Group not found")
-        val g = if (g0.shareIndex != null) g0 else running.withLock { publish(DriveClient(accessToken), g0, me) }
+        val g = if (g0.shareIndex != null) g0 else {
+            val quick = running.withLock { dao.groupNow(groupId)?.takeIf { it.shareIndex != null } ?: firstIndex(DriveClient(accessToken), g0, me) }
+            BackupWorker.syncShares(context) // the full share (documents, files) uploads in the background
+            quick
+        }
         GroupInvite(g.id, g.name, g.code, g.shareIndex!!, me.id, dao.accountNow()?.name ?: me.name)
+    }
+
+    /** A first, tiny share index (just you), link-shared, so an invite exists before the files are uploaded. */
+    private suspend fun firstIndex(drive: DriveClient, g: GroupEntity, me: MemberEntity): GroupEntity {
+        val key = key(g)
+        val folder = g.shareFolder ?: run {
+            val root = drive.folder("Lararium", null, mapOf(DriveBackup.P_ROOT to "1"))
+            val groupFolder = drive.folder(g.name, root, mapOf(DriveBackup.P_GROUP to g.id), "Lararium group · its people, Common vault and events")
+            drive.folder("Shared with ${g.name} (encrypted)", groupFolder, mapOf(P_SHARE to g.id),
+                "Encrypted copy for the other members of ${g.name}. Only readable in Lararium with the group's code.")
+        }
+        val name = dao.accountNow()?.name ?: me.name
+        val text = JSONObject().put("v", 1).put("group", g.id).put("name", g.name).put("from", JSONObject().put("key", me.id).put("name", name))
+            .put("members", JSONArray().put(JSONObject().put("id", me.id).put("name", name).put("relation", me.relation).put("kind", "self").put("avatar", me.avatar ?: JSONObject.NULL)))
+            .put("documents", JSONArray()).put("passwords", JSONArray())
+            .put("peers", JSONArray(g.peerList.map { JSONObject().put("key", it.key).put("name", it.name).put("index", it.index) })).toString()
+        val id = drive.upsertFile(folder, "index.fdx", BackupCrypto.seal(text.toByteArray(), key, GroupInvite.salt(g.id)), OCTET, mapOf(P_SHARE_FILE to "${g.id}:index"), null, P_SHARE_FILE)
+        drive.shareWithLink(id)
+        val out = g.copy(shareFolder = folder, shareIndex = id)
+        dao.upsertGroup(out)
+        return out
     }
 
     /**
@@ -86,6 +118,7 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
             if (accessToken != null) runCatching { publish(DriveClient(accessToken), dao.groupNow(g.id)!!, me) }
             err
         }
+        if (accessToken == null) BackupWorker.syncShares(context)
         dao.groupNow(g.id)!! to problem
     }
 
@@ -101,7 +134,11 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
     /** The group's key (from its code and id): seals the shares, and join-request replies only members can read. */
     fun groupKey(g: GroupEntity) = key(g)
 
-    private fun key(g: GroupEntity) = BackupCrypto.deriveKey(GroupCodes.normalize(g.code).toCharArray(), GroupInvite.salt(g.id))
+    // The key is slow to derive on purpose (it protects the code), so it's worked out once per group and code.
+    private val keyCache = java.util.concurrent.ConcurrentHashMap<String, ByteArray>()
+    private fun key(g: GroupEntity) = keyCache.getOrPut("${g.id}|${GroupCodes.normalize(g.code)}") {
+        BackupCrypto.deriveKey(GroupCodes.normalize(g.code).toCharArray(), GroupInvite.salt(g.id))
+    }
 
     private suspend fun publish(drive: DriveClient, g: GroupEntity, me: MemberEntity): GroupEntity {
         val key = key(g); val salt = GroupInvite.salt(g.id)
@@ -113,7 +150,8 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
 
         val all = dao.membersNow()
         val common = all.firstOrNull { it.shared && it.groupId == g.id }
-        val people = listOf(me) + listOfNotNull(common) + all.filter { it.groupId == g.id && !it.shared && !it.isSelf && it.origin == null }
+        // Only you and the Common vault: everyone else in a group has their own account and shares their own.
+        val people = listOf(me) + listOfNotNull(common)
         val ids = people.map { it.id }.toSet()
         val docs = dao.allDocumentsNow().filter { it.memberId in ids && it.origin == null && it.eventId == null }
         val pws = common?.let { c -> dao.allPasswordsNow().filter { it.memberId == c.id && it.origin == null } }.orEmpty()
@@ -218,7 +256,7 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
         // Their name may have changed, and they may know members you don't yet.
         val now = dao.groupNow(g.id) ?: g
         val known = now.peerList.associateBy { it.key }.toMutableMap()
-        known[p.key] = p.copy(name = from.optString("name", p.name), at = System.currentTimeMillis())
+        known[p.key] = p.copy(name = from.optString("name", p.name), at = System.currentTimeMillis(), err = null)
         j.optJSONArray("peers")?.forEachObj { o -> val k = o.getString("key"); if (k != myKey && k !in known) known[k] = Peer(k, o.optString("name"), o.getString("index")) }
         dao.upsertGroup(now.copy(peers = Peer.encode(known.values.toList())))
         return changed

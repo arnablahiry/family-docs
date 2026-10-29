@@ -113,7 +113,13 @@ class VaultRepository(private val dao: VaultDao, val files: FileStore) {
         if (dao.sharedIn(groupId.value) == null) {
             dao.upsertMember(MemberEntity(UUID.randomUUID().toString(), "Common", "Shared", photoFile = null, createdAt = 0L, shared = true, groupId = groupId.value))
         }
-        if (self == null) ensureFamily()
+    }
+
+    /** People made on this phone (not you, not Common, not shared by other members) that have no documents or logins. */
+    suspend fun removeEmptyLocalPeople() = withContext(Dispatchers.IO) {
+        val docs = dao.allDocumentsNow().map { it.memberId }.toSet(); val pws = dao.allPasswordsNow().map { it.memberId }.toSet()
+        dao.membersNow().filter { !it.isSelf && !it.shared && it.origin == null && it.id !in docs && it.id !in pws }
+            .forEach { files.delete(it.photoFile); dao.deleteMember(it.id) }
     }
 
     /**

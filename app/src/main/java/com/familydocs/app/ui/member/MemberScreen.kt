@@ -193,7 +193,6 @@ fun MemberScreen(memberId: String, onBack: () -> Unit, onEdit: () -> Unit, onPas
                             owner = m,
                             onOpenBounds = { openBounds = it },
                             stretch = { rubber.value },
-                            tilt = { rubber.tilt },
                             onReorder = { newShown ->
                                 // Only the visible cards moved: hidden ones (other countries) keep their places.
                                 val moved = newShown.iterator(); val shownIds = newShown.toSet()
@@ -310,42 +309,11 @@ private class RubberBand(private val scope: kotlinx.coroutines.CoroutineScope) :
         return Offset(0f, next - o)
     }
 
-    /**
-     * Degrees the cards lean while the list moves: pulled down (dy > 0) they tip towards you, pushed up they tip away.
-     * The finger's speed sets a target (a few degrees at most); the lean follows it on a soft spring every frame and
-     * eases back to level when the finger stops, so it stays smooth with touch.
-     */
-    var tilt by mutableFloatStateOf(0f); private set
-    private var target = 0f
-    private var velocity = 0f
-    private var lastInput = 0L
-    private var loop: kotlinx.coroutines.Job? = null
-    private fun lean(dy: Float) {
-        if (dy == 0f) return
-        target = (target * .55f + dy * .45f * .18f).coerceIn(-9f, 9f)  // dy in px: the lean follows the finger's speed
-        lastInput = System.nanoTime()
-        if (loop?.isActive == true) return
-        loop = scope.launch {
-            var last = androidx.compose.runtime.withFrameNanos { it }
-            while (true) {
-                val now = androidx.compose.runtime.withFrameNanos { it }
-                val dt = ((now - last) / 1e9f).coerceIn(0f, .032f); last = now
-                if (System.nanoTime() - lastInput > 60_000_000L) target *= Math.pow(.004, dt.toDouble()).toFloat()
-                val k = 480f; val c = 2f * .82f * kotlin.math.sqrt(k) // stiff: follows at once and settles fast, like something with weight
-                velocity += (k * (target - tilt) - c * velocity) * dt
-                tilt += velocity * dt
-                if (abs(target) < .01f && abs(tilt) < .01f && abs(velocity) < .05f) { tilt = 0f; velocity = 0f; target = 0f; break }
-            }
-        }
-    }
-
     override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
-        lean(consumed.y)
         if (source != NestedScrollSource.UserInput || available.y == 0f) return Offset.Zero
         settle?.cancel()
         val resist = 1f / (1f + abs(value) / 140f)
         value = (value + available.y * .3f * resist).coerceIn(-180f, 260f)
-        lean(available.y * .5f)   // stretching / squishing at the ends leans them a little too
         return Offset(0f, available.y)
     }
 

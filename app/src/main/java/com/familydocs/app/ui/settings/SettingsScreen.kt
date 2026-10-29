@@ -190,7 +190,11 @@ fun SettingsScreen(onBack: () -> Unit, onEditAccount: () -> Unit, onChangePassco
                     FdListItem(m.name, "${if (m.shared) "Shared by everyone" else m.relation} · $n document${if (n == 1) "" else "s"}", first = i == 0,
                         onClick = { onMember(m.id) }, leading = { FdAvatar(m.name, 38.dp, photoFile = m.photoFile, character = m.avatar, shared = m.shared) })
                 }
-                FdListItem("Add family member", "Someone else whose documents you keep", first = members.isEmpty(), icon = "plus", onClick = onAddMember)
+                // Everyone in a group has their own account: they join with an invite or the group's code.
+                val gid by app.repo.groupId.collectAsStateWithLifecycle()
+                val invite = com.familydocs.app.ui.home.rememberInviteSender()
+                FdListItem("Invite someone", "They join with their own Google account and share their own documents", first = members.isEmpty(), icon = "plus",
+                    onClick = { gid?.let(invite) })
             }
 
             FdSectionTitle("Security")

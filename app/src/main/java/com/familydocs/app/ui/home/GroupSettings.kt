@@ -121,6 +121,8 @@ fun GroupSettingsSheet(groupId: String, intro: String? = null, joinedFrom: Strin
         r.onSuccess { s ->
             scope.launch {
                 busy = "Syncing…"
+                // new members (and requests) first, then publish yours and read everyone's
+                if (app.requests.enabled) { busy = "Checking for new members…"; runCatching { app.requests.checkGroups() } }
                 runCatching { app.share.sync(s.token, g.id) { msg -> busy = msg } }.onSuccess { toast.show(it) }.onFailure { toast.show("Couldn't sync: ${it.message}") }
                 busy = null
             }
@@ -203,6 +205,7 @@ fun GroupSettingsSheet(groupId: String, intro: String? = null, joinedFrom: Strin
                         Column(Modifier.weight(1f)) {
                             Text(p.name.ifBlank { "Group member" }, style = fdText(14.5f, FontWeight.Medium))
                             Text(if (p.at == 0L) "Not read yet" else "Updated " + android.text.format.DateUtils.getRelativeTimeSpanString(p.at), style = fdText(12f, color = c.muted))
+                            p.err?.let { Text("Last sync: $it", style = fdText(11.5f, color = c.danger), maxLines = 2) }
                         }
                         FdIconButton("close", { forgetting = p.key }, size = 36.dp, iconSize = 16.dp, tint = c.muted, description = "Stop reading ${p.name}'s share")
                     }

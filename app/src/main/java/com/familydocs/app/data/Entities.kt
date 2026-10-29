@@ -42,13 +42,14 @@ data class GroupEntity(
 }
 
 /** Another account in a group: their app shares an encrypted index file (Drive "anyone with the link", sealed with the group code). */
-data class Peer(val key: String, val name: String, val index: String, val at: Long = 0L) {
+data class Peer(val key: String, val name: String, val index: String, val at: Long = 0L, val err: String? = null) {
     companion object {
         fun encode(list: List<Peer>): String? = if (list.isEmpty()) null else JSONArray(list.map {
-            JSONObject().put("key", it.key).put("name", it.name).put("index", it.index).put("at", it.at) }).toString()
+            JSONObject().put("key", it.key).put("name", it.name).put("index", it.index).put("at", it.at).put("err", it.err ?: JSONObject.NULL) }).toString()
         fun decode(json: String?): List<Peer> = runCatching {
             val a = JSONArray(json ?: return emptyList())
-            (0 until a.length()).map { a.getJSONObject(it).let { o -> Peer(o.getString("key"), o.optString("name"), o.getString("index"), o.optLong("at")) } }
+            (0 until a.length()).map { a.getJSONObject(it).let { o -> Peer(o.getString("key"), o.optString("name"), o.getString("index"), o.optLong("at"),
+                if (o.isNull("err")) null else o.optString("err").ifEmpty { null }) } }
         }.getOrDefault(emptyList())
     }
 }

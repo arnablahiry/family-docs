@@ -188,9 +188,6 @@ fun FdFlag(code: String, width: Dp = 22.dp, ring: Color = Color(0x1F000000), gre
     else Box(m.background(Color(0x33808080)), contentAlignment = Alignment.Center) { Text(code, style = fdText(9f, FontWeight.Bold)) }
 }
 
-/** The darker colour of a card's thick edge (shown while the stack leans). */
-private fun edgeOf(d: DocumentEntity): Color = lerp(Color(0xFF0B1020), Color(DocTypes.forName(d.name).hue), .62f)
-
 // ---------------- document icons ----------------
 
 fun DocIcon.demoName(): String = when (this) {
@@ -563,14 +560,7 @@ fun FdWalletStack(
                         // Stays on top while held and while landing; then takes its place in the stack so the cards
                         // below close up over it (no snap behind them at the end).
                         Modifier.zIndex(if (dragging || d.id == landingId) 1000f else i.toFloat()).then(place).height(cardH).alpha(dim)
-                            // scrolling: the cards lean back a little with the motion (a touch less further down)
-                            .graphicsLayer { scaleX = lift; scaleY = lift; if (!dragging) { rotationX = -tilt() * (1f - i * .05f).coerceAtLeast(.7f) /* negative: top edge towards you */; cameraDistance = 7f * this.density } }
-                            // a thick card: tipped towards you its top edge shows, tipped away its bottom edge
-                            .then(if (dragging) Modifier else Modifier.drawBehind {
-                                val e = -tilt() * .9f * density.density
-                                if (kotlin.math.abs(e) > .4f) drawRoundRect(edgeOf(d), topLeft = androidx.compose.ui.geometry.Offset(0f, e),
-                                    size = size, cornerRadius = androidx.compose.ui.geometry.CornerRadius(18.dp.toPx()))
-                            })
+                            .graphicsLayer { scaleX = lift; scaleY = lift }
                             .onGloballyPositioned { if (isOpen) onOpenBounds(it.boundsInRoot()) }
                             // One gesture handler for both (a separate clickable would grab the touch first):
                             // quick tap → lift / open; hold still ~0.4 s → pick up and drag; move straight away → the list scrolls.

@@ -23,6 +23,8 @@ data class Settings(
     val familyPresetDone: Boolean = false,
     /** The "backups & sharing" note for your first group has been shown. */
     val groupIntroDone: Boolean = false,
+    /** The empty made-up people (old preset family) have been removed once (0.7.3). */
+    val peopleCleanupDone: Boolean = false,
     /** The group shown on Home (id); null = the first one. */
     val currentGroup: String? = null,
 )
@@ -44,6 +46,7 @@ class SettingsStore(context: Context) {
         viewableCopies = prefs.getBoolean("viewable_copies", false),
         familyPresetDone = prefs.getBoolean("family_preset", false),
         groupIntroDone = prefs.getBoolean("group_intro", false),
+        peopleCleanupDone = prefs.getBoolean("people_cleanup", false),
         currentGroup = prefs.getString("group", null),
     )
 
@@ -51,7 +54,7 @@ class SettingsStore(context: Context) {
         val s = block(_state.value)
         prefs.edit()
             .putBoolean("biometric", s.biometric).putLong("autolock", s.autoLockMs).putBoolean("shots", s.blockScreenshots)
-            .putBoolean("backup", s.backupEnabled).putLong("last_backup", s.lastBackup).putString("view", s.vaultView.name).putString("theme", s.theme.name).putBoolean("viewable_copies", s.viewableCopies).putBoolean("family_preset", s.familyPresetDone).putBoolean("group_intro", s.groupIntroDone).putString("group", s.currentGroup)
+            .putBoolean("backup", s.backupEnabled).putLong("last_backup", s.lastBackup).putString("view", s.vaultView.name).putString("theme", s.theme.name).putBoolean("viewable_copies", s.viewableCopies).putBoolean("family_preset", s.familyPresetDone).putBoolean("group_intro", s.groupIntroDone).putBoolean("people_cleanup", s.peopleCleanupDone).putString("group", s.currentGroup)
             .apply()
         _state.value = s
     }

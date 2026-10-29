@@ -223,7 +223,8 @@ fun RegisterScreen(vm: OnboardingViewModel, onBack: () -> Unit, title: String = 
                     singleLine = false)
             }
 
-            FdField("Countries you keep documents for", error = e["countries"],
+            // Not asked at sign-up (the filters follow your documents); editable later in Settings › Your account.
+            if (vm.editing) FdField("Countries you keep documents for", error = e["countries"],
                 hint = "These become the country filters and the “Issued by” choices. You can change them later in Settings.") {
                 FdCountryPicker(vm.countries, vm::toggleCountry)
             }

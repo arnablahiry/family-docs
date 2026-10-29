@@ -88,14 +88,28 @@ fun FamilyScreen(onMember: (String) -> Unit, onSettings: () -> Unit, onDocument:
     val c = Fd.c
     val groups by app.repo.groups.collectAsStateWithLifecycle(emptyList())
     val gid by app.repo.groupId.collectAsStateWithLifecycle()
-    // Once per phone: if you're one of the preset family, the other two appear with the right relation and picture.
+    // People are the group's members with their own accounts (and Common). Once: remove the people this phone made up
+    // earlier that have nothing in them (the old preset family); anyone with documents stays.
     LaunchedEffect(Unit) {
-        if (!app.settings.value.familyPresetDone) { app.repo.ensureFamily(); app.settings.update { it.copy(familyPresetDone = true) } }
+        if (!app.settings.value.peopleCleanupDone) { app.repo.removeEmptyLocalPeople(); app.settings.update { it.copy(peopleCleanupDone = true, familyPresetDone = true) } }
+    }
+    // Whenever Home comes back to the screen: new members / requests, then publish and read the group's shares.
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    androidx.compose.runtime.DisposableEffect(lifecycle) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, e ->
+            if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                app.appScope.launch {
+                    if (app.requests.enabled) runCatching { app.requests.checkGroups() }
+                    com.familydocs.app.backup.BackupWorker.syncShares(app.appContext)
+                }
+            }
+        }
+        lifecycle.addObserver(obs)
+        onDispose { lifecycle.removeObserver(obs) }
     }
     var sheet by remember { mutableStateOf<String?>(null) } // "create" | "join"
     // Group settings (with a short explanation right after creating / joining): group id, intro, who invited you
     var settingsFor by remember { mutableStateOf<Triple<String, String?, String?>?>(null) }
-    LaunchedEffect(Unit) { if (app.requests.enabled) runCatching { app.requests.checkGroups() } }
     // First time on Home with a group you made at sign-up: explain backups and sharing once.
     LaunchedEffect(groups.isNotEmpty()) {
         val first = groups.firstOrNull() ?: return@LaunchedEffect
