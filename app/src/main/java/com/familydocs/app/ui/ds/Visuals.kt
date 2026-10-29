@@ -59,6 +59,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -281,6 +282,10 @@ fun FdWalletCard(
     photoFile: String? = null, character: String? = null, shared: Boolean = false,
     /** Cast a shadow up onto the card behind it (every card in a stack but the first). */
     shadeAbove: Boolean = false,
+    /** 1 = normal; lower fades the card towards the background (the others while one is lifted). Shadows stay. */
+    dim: Float = 1f,
+    /** How strong that shadow is: it fades out (smoothly) where the card sits in a gap rather than on another card. */
+    shadeStrength: Float = 1f,
 ) {
     val c = Fd.c
     val t = DocTypes.forName(doc.name)
@@ -307,11 +312,15 @@ fun FdWalletCard(
                 // Exactly as wide as the cards (no inset, no corners of its own), so its sides line up with the card
                 // edges; it runs on under this card's rounded top corners, where the card behind shows through.
                 val h = 26.dp.toPx(); val r = 18.dp.toPx()
-                drawRect(Brush.verticalGradient(0f to Color.Transparent, .55f to Color.Black.copy(alpha = if (c.dark) .32f else .16f),
-                    1f to Color.Black.copy(alpha = if (c.dark) .62f else .38f), startY = -h, endY = r),
+                val k = shadeStrength
+                drawRect(Brush.verticalGradient(0f to Color.Transparent, .55f to Color.Black.copy(alpha = (if (c.dark) .32f else .16f) * k),
+                    1f to Color.Black.copy(alpha = (if (c.dark) .62f else .38f) * k), startY = -h, endY = r),
                     topLeft = Offset(0f, -h), size = androidx.compose.ui.geometry.Size(size.width, h + r))
             } else Modifier)
             .shadow(shadow, shape, ambientColor = Color(0xB3000000), spotColor = Color(0xCC000000)).clip(shape)
+            // Fading with a veil on top, not transparency: a see-through layer would cut off the shadow drawn above the
+            // card, so it would vanish while another card is lifted and snap back after.
+            .drawWithContent { drawContent(); if (dim < 1f) drawRect(c.bg.copy(alpha = 1f - dim)) }
             .border(2.dp, (if (paper) hue else Color.White).copy(alpha = (if (paper) .7f else .75f) * rim), shape)
             .then(if (paper) Modifier.background(sheet).border(1.dp, hue.copy(alpha = .22f), shape)
             else Modifier.background(Brush.linearGradient(listOf(hue, deep), Offset.Zero, Offset(900f, 1100f)))),
@@ -559,6 +568,8 @@ fun FdWalletStack(
                     val top by animateDpAsState(tops[i], if (dragId != null) tween(260, easing = FdEase) else tween(450, easing = FdEase), label = "cardTop")
                     val isOpen = i == openIndex
                     val dim by animateFloatAsState(if (openIndex >= 0 && !isOpen) .45f else 1f, tween(300), label = "cardDim")
+                    // the card just below a lifted one sits in the gap: its shadow fades there and back, never pops
+                    val shade by animateFloatAsState(if (openIndex >= 0 && i == openIndex + 1 && !dragging) 0f else 1f, tween(450, easing = FdEase), label = "cardShade")
                     // Pick-up: a springy pop to 1.05×; put-down: back to 1× with a soft squash as it lands
                     // (the under-damped spring dips just below 1 before settling).
                     val lift by animateFloatAsState(if (dragging) 1.05f else 1f,
@@ -572,7 +583,7 @@ fun FdWalletStack(
                         d, holderFallback, isOpen || dragging,
                         // Stays on top while held and while landing; then takes its place in the stack so the cards
                         // below close up over it (no snap behind them at the end).
-                        Modifier.zIndex(if (dragging || d.id == landingId) 1000f else i.toFloat()).then(place).height(cardH).alpha(dim)
+                        Modifier.zIndex(if (dragging || d.id == landingId) 1000f else i.toFloat()).then(place).height(cardH)
                             .graphicsLayer { scaleX = lift; scaleY = lift }
                             .onGloballyPositioned { if (isOpen) onOpenBounds(it.boundsInRoot()) }
                             // One gesture handler for both (a separate clickable would grab the touch first):
@@ -620,7 +631,7 @@ fun FdWalletStack(
                                     }
                                 }
                             },
-                        photoFile = owner?.photoFile, character = owner?.avatar, shared = owner?.shared == true, shadeAbove = i > 0 || dragging,
+                        photoFile = owner?.photoFile, character = owner?.avatar, shared = owner?.shared == true, shadeAbove = i > 0 || dragging, dim = dim, shadeStrength = shade,
                     )
                 }
             }
