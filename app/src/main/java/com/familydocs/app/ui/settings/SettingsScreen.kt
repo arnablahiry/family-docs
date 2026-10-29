@@ -95,7 +95,7 @@ import java.util.Locale
 
 private enum class DriveAction { Enable, Backup, Restore, SignOut, Delete }
 
-/** Demo `settings`: profile card, Security, Countries, Backup, About, all as `.list` groups with `.lic` tiles and `.sw` switches. */
+/** Demo `settings`: profile card, Group, Security, Backup, About (your countries are under Your account), all as `.list` groups with `.lic` tiles and `.sw` switches. */
 @Composable
 fun SettingsScreen(onBack: () -> Unit, onEditAccount: () -> Unit, onChangePasscode: () -> Unit, onMember: (String) -> Unit = {}, onAddMember: () -> Unit = {}) {
     val app = LocalContainer.current
@@ -208,12 +208,6 @@ fun SettingsScreen(onBack: () -> Unit, onEditAccount: () -> Unit, onChangePassco
                 FdListItem("Block screenshots", "Hides the app in Recents too", icon = "eyeoff", trailing = {
                     FdSwitch(s.blockScreenshots, { v -> app.settings.update { it.copy(blockScreenshots = v) } }, "Block screenshots")
                 })
-            }
-
-            FdSectionTitle("Countries")
-            FdList {
-                FdListItem("Document countries", countries.joinToString(" · ") { Countries.name(it) }, first = true, icon = "plane", onClick = onEditAccount,
-                    chevron = true, trailing = { Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) { countries.take(4).forEach { FdFlag(it, 20.dp) } } })
             }
 
             FdSectionTitle("Backup")
