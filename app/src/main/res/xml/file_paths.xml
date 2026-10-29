@@ -2,4 +2,6 @@
 <paths>
     <cache-path name="camera" path="camera/" />
     <cache-path name="updates" path="updates/" />
+    <!-- plain copies of a document's files while you share them (cleared the next time) -->
+    <cache-path name="share" path="share/" />
 </paths>

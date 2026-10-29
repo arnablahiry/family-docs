@@ -57,6 +57,7 @@ private val TYPE_PALETTES: Map<String, LongArray> = mapOf(
     "property" to longArrayOf(0xFF7C7398, 0xFF585073, 0xFF675F84, 0xFF544D6C, 0xFF423C56),
     "bill" to longArrayOf(0xFFA28C5E, 0xFF776440, 0xFF8A7650, 0xFF71603F, 0xFF5A4C31),
     "tax" to longArrayOf(0xFF5E7B8F, 0xFF41596B, 0xFF4D687B, 0xFF3E5465, 0xFF314352),
+    "afmamka" to longArrayOf(0xFF5E7B8F, 0xFF41596B, 0xFF4D687B, 0xFF3E5465, 0xFF314352),
 )
 
 /** Muted colours from each country's flag: sky, sky 2, hill 1, hill 2, hill 3. */
@@ -79,6 +80,7 @@ private val MOTIFS: Map<String, Int> = mapOf(
     "property" to R.drawable.card_m_property,
     "bill" to R.drawable.card_m_bill,
     "tax" to R.drawable.card_m_tax,
+    "afmamka" to R.drawable.card_m_tax,
 )
 
 /** [sky, sky2, hill1, hill2, hill3] for a card type. */

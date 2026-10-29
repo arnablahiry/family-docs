@@ -230,8 +230,16 @@ fun DocumentEntity.fieldValue(key: String): String? =
 /** The document's main number, shown in full (e.g. "9649 3578 0824"); otherwise its first filled detail. Degrees: the year. */
 fun DocumentEntity.tail(): String {
     if (DocTypes.forName(name).key == "education") fieldValue("year of passing")?.let { return it }
+    // AFM & AMKA: both numbers on the card
+    if (DocTypes.forName(name).key == "afmamka") afmAmka().takeIf { it.isNotEmpty() }?.let { return it.joinToString("  ·  ") { (l, v) -> "$l $v" } }
     val f = fields.firstOrNull { it.sensitive && it.value.isNotBlank() } ?: fields.firstOrNull { it.value.isNotBlank() }
     return when { f == null -> "No details yet"; f.sensitive -> f.value.trim(); else -> f.value.take(14) }
+}
+
+/** The AFM and AMKA numbers of an "AFM & AMKA" document, labelled, in that order (whichever are filled). */
+fun DocumentEntity.afmAmka(): List<Pair<String, String>> {
+    fun get(re: String) = fields.firstOrNull { Regex(re, RegexOption.IGNORE_CASE).containsMatchIn(it.label) && it.value.isNotBlank() }?.value?.trim()
+    return listOfNotNull(get("\\bafm\\b|ΑΦΜ|tax")?.let { "AFM" to it }, get("\\bamka\\b|ΑΜΚΑ|social")?.let { "AMKA" to it })
 }
 
 fun DocumentEntity.validUntil(): String? = fieldValue("expiry")
@@ -342,11 +350,16 @@ fun FdWalletCard(
         }
 
         // ---- content ----
+        // AFM & AMKA cards carry both numbers: stacked in the strip, side by side on the card.
+        val nums = if (t.key == "afmamka") doc.afmAmka() else emptyList()
         Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 14.dp)) {
             Row(Modifier.height(30.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                 FdIcon(t.icon.demoName(), 20.dp, tint = ink)
                 Text(doc.name, style = fdText(15f, FontWeight.SemiBold, ink), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                Text(doc.tail(), style = fdText(11.5f, color = ink.copy(alpha = .85f)), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                if (nums.size == 2) Column(Modifier.widthIn(max = w * .5f), horizontalAlignment = Alignment.End) {
+                    nums.forEach { (l, v) -> Text("$l  $v", style = fdText(10.5f, color = ink.copy(alpha = .88f), lineHeight = 13f), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                }
+                else Text(doc.tail(), style = fdText(11.5f, color = ink.copy(alpha = .85f)), maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.widthIn(max = w * .45f))
                 if (doc.issuer.isNotEmpty()) FdFlag(doc.issuer, 24.dp, ring = if (paper) Color(0x1F000000) else Color.White.copy(alpha = .55f))
             }
@@ -379,7 +392,15 @@ fun FdWalletCard(
                 else -> {
                     Spacer(Modifier.weight(1f))
                     val subject = doc.fieldValue("subject")
-                    if (t.key == "education" && subject != null) {
+                    if (nums.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(22.dp)) {
+                        nums.forEach { (l, v) ->
+                            Column {
+                                Text(l, style = fdText(10f, FontWeight.Medium, ink.copy(alpha = .75f), spacing = .1f))
+                                Text(v, style = fdText(17f, color = ink, spacing = .05f), maxLines = 1)
+                            }
+                        }
+                    }
+                    else if (t.key == "education" && subject != null) {
                         // Degree cards: the degree, then subject and specialisation instead of a number.
                         doc.fieldValue("degree")?.let { Text(it, style = fdText(12.5f, color = ink.copy(alpha = .85f)), maxLines = 1, overflow = TextOverflow.Ellipsis) }
                         Text(subject, style = fdText(19f, FontWeight.SemiBold, ink), maxLines = 1, overflow = TextOverflow.Ellipsis)

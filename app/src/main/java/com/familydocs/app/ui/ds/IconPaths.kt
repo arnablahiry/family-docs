@@ -26,6 +26,8 @@ internal val ICON_PATHS: Map<String, List<Pair<String, Boolean>>> = mapOf(
     "key" to listOf("M4 15.5a4 4 0 1 0 8 0a4 4 0 1 0 -8 0z" to false, "M10.9 12.6L20 3.5M16.8 6.7l2.8 2.8M14.6 8.9l2 2" to false),
     "camera" to listOf("M5.5 7h13a2.5 2.5 0 0 1 2.5 2.5v8a2.5 2.5 0 0 1 -2.5 2.5h-13a2.5 2.5 0 0 1 -2.5 -2.5v-8a2.5 2.5 0 0 1 2.5 -2.5z" to false, "M8.2 7l1.5-3h4.6l1.5 3" to false, "M8.5 13.5a3.5 3.5 0 1 0 7 0a3.5 3.5 0 1 0 -7 0z" to false),
     "upload" to listOf("M12 15.5V4M7 8.5l5-4.5 5 4.5" to false, "M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4" to false),
+    "download" to listOf("M12 4v11.5M7 11l5 4.5 5-4.5" to false, "M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4" to false),
+    "share" to listOf("M15.5 5.5a2.5 2.5 0 1 0 5 0a2.5 2.5 0 1 0 -5 0z" to false, "M3.5 12a2.5 2.5 0 1 0 5 0a2.5 2.5 0 1 0 -5 0z" to false, "M15.5 18.5a2.5 2.5 0 1 0 5 0a2.5 2.5 0 1 0 -5 0z" to false, "M8.2 10.8l7.6-4.1M8.2 13.2l7.6 4.1" to false),
     "copy" to listOf("M11 9h7a2 2 0 0 1 2 2v7a2 2 0 0 1 -2 2h-7a2 2 0 0 1 -2 -2v-7a2 2 0 0 1 2 -2z" to false, "M5 15V6a2 2 0 0 1 2-2h8" to false),
     "eye" to listOf("M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" to false, "M9 12a3 3 0 1 0 6 0a3 3 0 1 0 -6 0z" to false),
     "eyeoff" to listOf("M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" to false, "M9 12a3 3 0 1 0 6 0a3 3 0 1 0 -6 0z" to false, "M4 4l16 16" to false),

@@ -43,6 +43,8 @@ object DocTypes {
         Regex("degree|diploma|marksheet|transcript|school|universit|\\bph\\.?d|\\bm\\.?sc|\\bb\\.?sc|\\bb\\.?tech", I) to DocType("education", "Degree Certificate", DocIcon.CAP, 0xFF8A6D1F),
         Regex("birth|marriage|death|certificate|domicile|caste|income", I) to DocType("certificate", "Birth Certificate", DocIcon.CERTIFICATE, 0xFF9A5B2E),
         Regex("medical|prescription|blood|report|\\blab\\b", I) to DocType("medical", "Medical Report", DocIcon.MEDICAL, 0xFFC2453D),
+        // Greek tax number: one card with the social security number too (ΑΦΜ + ΑΜΚΑ). AMKA on its own stays Social Security.
+        Regex("\\bafm\\b|ΑΦΜ", I) to DocType("afmamka", "AFM & AMKA", DocIcon.RECEIPT, 0xFF47708A),
         Regex("social security|\\bssn\\b|\\bamka\\b|ΑΜΚΑ|national insurance|\\bnino?\\b|sozialversicherung|seguridad social|s[ée]curit[ée] sociale|\\besic\\b|\\bepfo?\\b|\\buan\\b", I) to DocType("social", "Social Security", DocIcon.PEOPLE, 0xFF4F7A96),
         Regex("\\btax\\b|\\bitr\\b|form ?16|\\bgst\\b|\\bafm\\b|ΑΦΜ", I) to DocType("tax", "Tax Document", DocIcon.RECEIPT, 0xFF47708A),
         Regex("\\bid\\b|identity|ταυτότητα|national", I) to DocType("id", "National ID", DocIcon.ID, 0xFF4B5D7A),
@@ -52,7 +54,7 @@ object DocTypes {
 
     val SUGGESTIONS = listOf(
         "Aadhaar", "PAN Card", "Passport", "Visa", "Residence Permit", "Driving Licence", "Voter ID",
-        "Social Security", "Health Insurance", "Birth Certificate", "Bank Passbook", "Vaccination Record", "Degree Certificate",
+        "Social Security", "AFM & AMKA", "Health Insurance", "Birth Certificate", "Bank Passbook", "Vaccination Record", "Degree Certificate",
     )
 
     /** Types offered when adding a document to an event (they set the name, so the icon and colour follow). */
@@ -77,6 +79,7 @@ object DocTypes {
         "bank" to listOf("Account No.", "IFSC / IBAN", "Branch"),
         "social" to listOf("Social Security No.", "Name", "Issued On"),
         "tax" to listOf("Tax No.", "Name"),
+        "afmamka" to listOf("AFM", "AMKA", "Name"),
         "id" to listOf("ID No.", "Surname", "Given Names", "Date of Birth", "Valid Until"),
         "education" to listOf("Degree", "Subject / Field", "Specialisation", "University", "Year of Passing", "Grade"),
         "property" to listOf("Contract No.", "Landlord", "Address", "Monthly Rent", "Valid Until"),
@@ -93,7 +96,7 @@ object DocTypes {
     fun flagByDefault(name: String) = forName(name).key in FLAG_TYPES
 
     /** National ID cards: these show the issuing country's flag faintly behind the card art unless turned off. */
-    val FLAG_TYPES = setOf("aadhaar", "visa", "residence", "id", "pan", "voter", "social", "tax")
+    val FLAG_TYPES = setOf("aadhaar", "visa", "residence", "id", "pan", "voter", "social", "tax", "afmamka")
 
     fun forName(name: String): DocType {
         val n = name.trim()

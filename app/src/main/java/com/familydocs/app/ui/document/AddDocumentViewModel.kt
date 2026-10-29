@@ -72,6 +72,9 @@ class AddDocumentViewModel(private val c: AppContainer, private val appContext: 
             existing = d
             name = d.name; display = d.display; rawText = d.rawText; countryChoice = d.country; showFlagChoice = d.showFlag
             fields.addAll(d.fields.map { EditField(label = it.label, value = it.value, auto = it.auto, verified = it.verified) })
+            // An AFM card also holds the AMKA: give older ones the empty field to fill in
+            if (DocTypes.forName(d.name).key == "afmamka" && fields.none { Regex("\\bamka\\b|ΑΜΚΑ|social", RegexOption.IGNORE_CASE).containsMatchIn(it.label) })
+                fields.add(EditField(label = "AMKA", value = ""))
             fieldsTouched = true
             if (d.readByOcr) ocr = OcrState.Done(null, d.fields.count { it.auto })
             withContext(Dispatchers.IO) {

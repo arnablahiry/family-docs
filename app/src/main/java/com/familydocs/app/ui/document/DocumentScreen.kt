@@ -100,6 +100,33 @@ fun DocumentScreen(docId: String, onBack: () -> Unit, onEdit: (memberId: String)
     val groups by app.repo.groups.collectAsStateWithLifecycle(emptyList())
     val sharedBy = d.origin?.let { o -> groups.flatMap { it.peerList }.firstOrNull { it.key == o }?.name ?: "another member" }
     // ...unless you're an admin of the group: then you can change or remove it, and their phone takes that over.
+    // ---- the document's files out of the vault: Downloads, or another app ----
+    var exporting by remember { mutableStateOf(false) }
+    val pickFolder = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree()) { tree ->
+        tree ?: return@rememberLauncherForActivityResult
+        scope.launch {
+            exporting = true
+            val n = runCatching { DocumentExport.toFolder(context, tree, app.files, d) }.getOrDefault(0)
+            exporting = false
+            toast.show(if (n > 0) "Saved ${if (n == 1) "the file" else "$n files"}" else "Couldn't save the file")
+        }
+    }
+    fun download() {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) scope.launch {
+            exporting = true
+            val n = runCatching { DocumentExport.toDownloads(context, app.files, d) }.getOrDefault(0)
+            exporting = false
+            toast.show(if (n > 0) "Saved to Downloads › Lararium${if (n > 1) " ($n files)" else ""}" else "Couldn't save the file")
+        } else { app.appLock.expectExternalActivity(); pickFolder.launch(null) }
+    }
+    fun share() {
+        scope.launch {
+            exporting = true
+            val chooser = runCatching { DocumentExport.shareIntent(context, app.files, d) }.getOrNull()
+            exporting = false
+            if (chooser == null) toast.show("Couldn't prepare the file") else { app.appLock.expectExternalActivity(); context.startActivity(chooser) }
+        }
+    }
     val admin = com.familydocs.app.ui.components.rememberIsAdmin(com.familydocs.app.ui.components.groupOfShared(d.id) ?: member?.groupId)
     val canEdit = sharedBy == null || admin
 
@@ -127,6 +154,11 @@ fun DocumentScreen(docId: String, onBack: () -> Unit, onEdit: (memberId: String)
                     }
                 }
                 if (pages.size > 1) PageDots(pages.size, pager.currentPage, Modifier.fillMaxWidth().padding(top = 8.dp))
+            }
+            // Download / Share the file itself (every page, as it was added)
+            if (d.attachments.isNotEmpty()) Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                FdButton("Download", ::download, Modifier.weight(1f), BtnKind.Ghost, icon = "download", enabled = !exporting)
+                FdButton("Share", ::share, Modifier.weight(1f), BtnKind.Ghost, icon = "share", enabled = !exporting)
             }
             FdSectionTitle("Details") { Text("${filled.size} field${if (filled.size == 1) "" else "s"}", style = fdText(11f, FontWeight.Medium, c.muted)) }
             if (filled.isEmpty()) FdEmpty("No details saved. Tap edit to add them.")
