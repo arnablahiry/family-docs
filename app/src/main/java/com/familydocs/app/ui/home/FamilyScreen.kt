@@ -150,7 +150,7 @@ fun FamilyScreen(onMember: (String) -> Unit, onSettings: () -> Unit, onDocument:
             if (from != null) settingsFor = Triple(id, "joined", from)
         }, onDismiss = { sheet = null })
     }
-    settingsFor?.let { (id, intro, from) -> GroupSettingsSheet(id, intro, from) { settingsFor = null } }
+    settingsFor?.let { (id, intro, from) -> GroupSettingsSheet(id, intro, from, onMember = onMember) { settingsFor = null } }
 }
 
 /** One group's home: its people, search and events (keyed by group, so the switch animation shows the right page). */

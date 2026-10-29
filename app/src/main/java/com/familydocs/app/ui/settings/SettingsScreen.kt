@@ -181,20 +181,18 @@ fun SettingsScreen(onBack: () -> Unit, onEditAccount: () -> Unit, onChangePassco
                 }
             }
 
-            FdSectionTitle("Family")
-            val counts by app.repo.documentCounts.collectAsStateWithLifecycle(emptyList())
+            // People live in Group settings now (with sync, admins and invites); here, a way in.
+            FdSectionTitle("Group")
+            val gid by app.repo.groupId.collectAsStateWithLifecycle()
+            val groupsNow by app.repo.groups.collectAsStateWithLifecycle(emptyList())
+            val grp = groupsNow.firstOrNull { it.id == gid }
+            var groupSheet by remember { mutableStateOf(false) }
+            val people = members.count { !it.shared }
             FdList {
-                members.forEachIndexed { i, m ->
-                    val n = counts.firstOrNull { it.memberId == m.id }?.n ?: 0
-                    FdListItem(m.name, "${if (m.shared) "Shared by everyone" else m.relation} · $n document${if (n == 1) "" else "s"}", first = i == 0,
-                        onClick = { onMember(m.id) }, leading = { FdAvatar(m.name, 38.dp, photoFile = m.photoFile, character = m.avatar, shared = m.shared) })
-                }
-                // Everyone in a group has their own account: they join with an invite or the group's code.
-                val gid by app.repo.groupId.collectAsStateWithLifecycle()
-                val invite = com.familydocs.app.ui.home.rememberInviteSender()
-                FdListItem("Invite someone", "They join with their own Google account and share their own documents", first = members.isEmpty(), icon = "plus",
-                    onClick = { gid?.let(invite) })
+                FdListItem(grp?.name ?: "Group", "$people ${if (people == 1) "person" else "people"} and Common · people, sharing, admins, backup", first = true,
+                    leading = { grp?.let { com.familydocs.app.ui.home.GroupPic(it, 38.dp) } }, onClick = { if (grp != null) groupSheet = true })
             }
+            if (groupSheet) gid?.let { id -> com.familydocs.app.ui.home.GroupSettingsSheet(id, onMember = onMember) { groupSheet = false } }
 
             FdSectionTitle("Security")
             FdList {
@@ -242,7 +240,7 @@ fun SettingsScreen(onBack: () -> Unit, onEditAccount: () -> Unit, onChangePassco
             FdSectionTitle("About")
             FdList {
                 FdListItem("Lararium ${version.substringBeforeLast('.').ifBlank { version }}",
-                    "${members.size} people · ${docs.size} documents on this phone", first = true, icon = "info")
+                    "${members.count { !it.shared }.let { "$it ${if (it == 1) "person" else "people"}" }} · ${docs.size} documents on this phone", first = true, icon = "info")
                 UpdateRow(app.updater) { app.appLock.expectExternalActivity() }
             }
             com.familydocs.app.ui.ds.FdMadeWith(Modifier.padding(top = 26.dp, bottom = 30.dp))

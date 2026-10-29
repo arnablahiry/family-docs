@@ -88,7 +88,7 @@ fun rememberInviteSender(onBusy: (Boolean) -> Unit = {}): (String) -> Unit {
  * [intro]: "created" or "joined" adds a short explanation at the top (shown right after making or joining a group).
  */
 @Composable
-fun GroupSettingsSheet(groupId: String, intro: String? = null, joinedFrom: String? = null, onDismiss: () -> Unit) {
+fun GroupSettingsSheet(groupId: String, intro: String? = null, joinedFrom: String? = null, onMember: ((String) -> Unit)? = null, onDismiss: () -> Unit) {
     val app = LocalContainer.current
     val c = Fd.c
     val toast = LocalToast.current
@@ -199,8 +199,13 @@ fun GroupSettingsSheet(groupId: String, intro: String? = null, joinedFrom: Strin
                 Spacer(Modifier.height(18.dp))
             }
 
-            // ---- sharing ----
-            Label("Shared with")
+            // ---- people: Common, you, and everyone who shares with you (tap one to open their vault) ----
+            Label("People")
+            val groupMembers by remember(g.id) { app.repo.membersOf(g.id) }.collectAsStateWithLifecycle(emptyList())
+            val counts by app.repo.documentCounts.collectAsStateWithLifecycle(emptyList())
+            fun docs(id: String?) = (counts.firstOrNull { it.memberId == id }?.n ?: 0).let { "$it document${if (it == 1) "" else "s"}" }
+            fun role(key: String?) = when { key == null -> null; key == g.creator -> "Admin · made the group"; key in g.adminKeys -> "Admin"; else -> null }
+            fun open(id: String): (() -> Unit)? = onMember?.let { f -> { onDismiss(); f(id) } }
             val peers = g.peerList
             if (peers.isNotEmpty()) {
                 val adminNames = g.adminKeys.mapNotNull { k -> if (k == self?.id) "you" else peers.firstOrNull { it.key == k }?.name }
@@ -210,28 +215,29 @@ fun GroupSettingsSheet(groupId: String, intro: String? = null, joinedFrom: Strin
                     else -> "Everyone keeps their own documents and profile up to date. Admins (${adminNames.joinToString(", ")}) can change anyone's."
                 }, style = fdText(12.5f, color = c.muted), modifier = Modifier.padding(bottom = 10.dp))
             }
-            if (peers.isEmpty()) Text("No one yet. Invite the others, or share the code: they can ask to join and you approve. Their documents come back automatically.",
-                style = fdText(13f, color = c.muted), modifier = Modifier.padding(bottom = 10.dp))
-            else Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).border(1.dp, c.line, RoundedCornerShape(16.dp)).padding(vertical = 2.dp)) {
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).border(1.dp, c.line, RoundedCornerShape(16.dp))) {
+                var first = true
+                groupMembers.firstOrNull { it.shared }?.let { m ->
+                    PersonRow(m.name, m, "Shared by everyone · ${docs(m.id)}", first = first, onClick = open(m.id)); first = false
+                }
+                groupMembers.firstOrNull { it.isSelf }?.let { m ->
+                    PersonRow(m.name, m, listOfNotNull("You", role(m.id), docs(m.id)).joinToString(" · "), first = first, onClick = open(m.id)); first = false
+                }
                 peers.forEach { p ->
-                    Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(p.name.ifBlank { "Group member" }, style = fdText(14.5f, FontWeight.Medium))
-                            when {
-                                p.key == g.creator -> "Admin · made the group"
-                                p.key in g.adminKeys -> "Admin"
-                                else -> null
-                            }?.let { Text(it, style = fdText(12f, FontWeight.SemiBold, c.accent)) }
-                            Text(if (p.at == 0L) "Not read yet" else "Updated " + android.text.format.DateUtils.getRelativeTimeSpanString(p.at), style = fdText(12f, color = c.muted))
-                            p.err?.let { Text("Last sync: $it", style = fdText(11.5f, color = c.danger), maxLines = 2) }
-                        }
+                    val m = groupMembers.firstOrNull { it.origin == p.key && !it.shared }
+                    PersonRow(p.name.ifBlank { m?.name ?: "Group member" }, m, listOfNotNull(role(p.key), docs(m?.id)).joinToString(" · "),
+                        status = if (p.at == 0L) "Not read yet" else "Updated " + android.text.format.DateUtils.getRelativeTimeSpanString(p.at),
+                        error = p.err?.let { "Last sync: $it" }, first = first, onClick = m?.let { open(it.id) }) {
                         when {
                             iAdmin && p.key != g.creator -> FdIconButton("sliders", { managing = p.key }, size = 36.dp, iconSize = 17.dp, tint = c.muted, description = "Manage ${p.name}")
                             !iAdmin -> FdIconButton("close", { forgetting = p.key }, size = 36.dp, iconSize = 16.dp, tint = c.muted, description = "Stop reading ${p.name}'s share")
                         }
                     }
+                    first = false
                 }
             }
+            if (peers.isEmpty()) Text("No one else yet. Invite the others, or share the code: they can ask to join and you approve. Their documents come back automatically.",
+                style = fdText(13f, color = c.muted), modifier = Modifier.padding(top = 10.dp))
             Spacer(Modifier.height(12.dp))
             FdButton("Invite someone", { sendInvite(g.id) }, icon = "people", enabled = busy == null)
             Spacer(Modifier.height(10.dp))
@@ -277,6 +283,25 @@ fun GroupSettingsSheet(groupId: String, intro: String? = null, joinedFrom: Strin
         val name = g.peerList.firstOrNull { it.key == key }?.name ?: "them"
         com.familydocs.app.ui.ds.FdConfirmSheet("Stop reading $name's share?", "What $name shared is removed from this phone. Nothing in their Drive changes; you can add their invite again later.",
             "Remove", onConfirm = { scope.launch { app.share.forget(g.id, key); forgetting = null; toast.show("Removed") } }, onDismiss = { forgetting = null })
+    }
+}
+
+/** One person in Group settings › People: picture, name, role and documents, sync state; tap to open their vault. */
+@Composable
+private fun PersonRow(name: String, m: com.familydocs.app.data.MemberEntity?, subtitle: String, status: String? = null, error: String? = null,
+                      first: Boolean, onClick: (() -> Unit)?, trailing: @Composable () -> Unit = {}) {
+    val c = Fd.c
+    if (!first) Box(Modifier.fillMaxWidth().height(1.dp).background(c.line))
+    Row(Modifier.fillMaxWidth().then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier).padding(start = 12.dp, end = 4.dp, top = 9.dp, bottom = 9.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        com.familydocs.app.ui.ds.FdAvatar(name, 38.dp, photoFile = m?.photoFile, character = m?.avatar, shared = m?.shared == true)
+        Column(Modifier.weight(1f)) {
+            Text(name, style = fdText(14.5f, FontWeight.Medium))
+            Text(subtitle, style = fdText(12f, color = c.muted))
+            status?.let { Text(it, style = fdText(11.5f, color = c.muted)) }
+            error?.let { Text(it, style = fdText(11.5f, color = c.danger), maxLines = 2) }
+        }
+        trailing()
     }
 }
 
