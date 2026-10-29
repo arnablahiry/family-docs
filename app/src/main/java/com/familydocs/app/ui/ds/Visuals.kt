@@ -304,11 +304,12 @@ fun FdWalletCard(
             // Elevation shadows fall downwards, where the next card covers them; so each card also darkens the strip
             // of the card behind it, just above its own top edge. Drawn by hand: it looks the same on every phone.
             .then(if (shadeAbove) Modifier.drawBehind {
-                val h = 26.dp.toPx(); val inset = 4.dp.toPx(); val r = 18.dp.toPx()
-                drawRoundRect(Brush.verticalGradient(0f to Color.Transparent, .55f to Color.Black.copy(alpha = if (c.dark) .32f else .16f),
-                    1f to Color.Black.copy(alpha = if (c.dark) .62f else .38f), startY = -h, endY = r * .6f),
-                    topLeft = Offset(inset, -h), size = androidx.compose.ui.geometry.Size(size.width - inset * 2, h + r),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(r, r))
+                // Exactly as wide as the cards (no inset, no corners of its own), so its sides line up with the card
+                // edges; it runs on under this card's rounded top corners, where the card behind shows through.
+                val h = 26.dp.toPx(); val r = 18.dp.toPx()
+                drawRect(Brush.verticalGradient(0f to Color.Transparent, .55f to Color.Black.copy(alpha = if (c.dark) .32f else .16f),
+                    1f to Color.Black.copy(alpha = if (c.dark) .62f else .38f), startY = -h, endY = r),
+                    topLeft = Offset(0f, -h), size = androidx.compose.ui.geometry.Size(size.width, h + r))
             } else Modifier)
             .shadow(shadow, shape, ambientColor = Color(0xB3000000), spotColor = Color(0xCC000000)).clip(shape)
             .border(2.dp, (if (paper) hue else Color.White).copy(alpha = (if (paper) .7f else .75f) * rim), shape)
