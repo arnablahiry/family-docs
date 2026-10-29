@@ -190,7 +190,14 @@ fun LockScreen(activity: FragmentActivity) {
     val verifyGoogle = rememberGoogleConnect { r ->
         val email = account?.backupEmail.orEmpty()
         r.onSuccess { g ->
-            if (g.profile.email.equals(email, ignoreCase = true)) { forgot = false; resetting = true }
+            if (g.profile.email.equals(email, ignoreCase = true)) {
+                // Second check: the phone's own screen lock, so holding an unlocked phone with Google signed in isn't enough.
+                if (com.familydocs.app.security.BiometricHelper.deviceSecure(activity)) {
+                    app.appLock.expectExternalActivity()
+                    com.familydocs.app.security.BiometricHelper.confirmDevice(activity, onSuccess = { forgot = false; resetting = true },
+                        onFail = { forgotError = "The phone's screen lock wasn't confirmed ($it), so the passcode stays as it is." })
+                } else { forgot = false; resetting = true }
+            }
             else forgotError = "That Google account (${g.profile.email}) isn't the one this vault backs up to."
         }.onFailure { forgotError = com.familydocs.app.auth.GoogleAccountHelper.explain(it) }
     }
@@ -198,24 +205,10 @@ fun LockScreen(activity: FragmentActivity) {
     if (forgot) {
         val email = account?.backupEmail.orEmpty()
         FdSheet({ forgot = false }) {
-            val deviceLock = com.familydocs.app.security.BiometricHelper.deviceSecure(activity)
             SheetTitle("Forgot your passcode?",
-                forgotError ?: "Prove it's you, then choose a new passcode. Your documents stay as they are.")
-            if (account?.googleLinked == true) {
-                FdButton("Verify with Google", verifyGoogle, icon = "user")
-                Text("Sign in as ${mask(email)} (needs internet)", style = fdText(12f, color = Fd.c.muted), modifier = Modifier.padding(top = 6.dp, bottom = 12.dp))
-            }
-            if (deviceLock) {
-                FdButton("Use this phone's screen lock", {
-                    app.appLock.expectExternalActivity()
-                    com.familydocs.app.security.BiometricHelper.confirmDevice(activity, onSuccess = { forgot = false; resetting = true },
-                        onFail = { forgotError = "The phone's screen lock wasn't confirmed ($it), so the passcode stays as it is." })
-                }, kind = if (account?.googleLinked == true) BtnKind.Ghost else BtnKind.Primary, icon = "lock")
-                Text("The PIN, pattern or fingerprint you unlock this phone with (works without internet)", style = fdText(12f, color = Fd.c.muted),
-                    modifier = Modifier.padding(top = 6.dp, bottom = 8.dp))
-            }
-            if (account?.googleLinked != true && !deviceLock) Text("Recovery needs your Google account linked (Settings › Your account) or a screen lock on this phone. Without either, the vault can't be unlocked, by design.",
-                style = fdText(13f, color = Fd.c.muted))
+                forgotError ?: if (email.isNotBlank() && account?.googleLinked == true) "Two quick checks: sign in with Google as ${mask(email)}, then unlock with this phone's own screen lock. Then you choose a new passcode. Your documents stay as they are."
+                else "Passcode recovery needs your Google account linked (Settings → Your account). Without it the vault can't be unlocked, by design.")
+            if (account?.googleLinked == true) FdButton("Verify with Google", verifyGoogle)
             Spacer(Modifier.size(10.dp))
             FdButton("Cancel", { forgot = false }, kind = BtnKind.Ghost)
         }

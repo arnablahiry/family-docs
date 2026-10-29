@@ -175,7 +175,6 @@ fun SettingsScreen(onBack: () -> Unit, onEditAccount: () -> Unit, onChangePassco
                     FdAvatar(a.name, 64.dp, photoFile = self?.photoFile ?: a.photoFile, character = self?.avatar)
                     Column(Modifier.weight(1f)) {
                         Text(a.name, style = fdText(16f, FontWeight.Bold))
-                        Text("${a.countryCode} ${a.phone}", style = fdText(12f, color = c.muted))
                         if (a.backupEmail.isNotBlank()) Text(a.backupEmail + if (a.googleLinked) " · Google" else "", style = fdText(12f, color = c.muted))
                     }
                     FdIconButton("edit", onEditAccount, iconSize = 19.dp, description = "Edit account")

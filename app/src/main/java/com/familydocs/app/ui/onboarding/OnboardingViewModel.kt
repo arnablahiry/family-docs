@@ -143,8 +143,6 @@ class OnboardingViewModel(private val c: AppContainer) : ViewModel() {
     fun validate(): Boolean {
         val e = mutableMapOf<String, String>()
         if (name.trim().length < 2) e["name"] = "Enter your name"
-        val digits = phone.filter(Char::isDigit)
-        if (digits.length !in 7..12) e["phone"] = "Enter a phone number with 7–12 digits"
         if (!googleLinked || email.isBlank()) e["email"] = "Connect your Google account to continue"
         if (editing && countries.isEmpty()) e["countries"] = "Pick at least one country"
         if (!editing && groupMode == "join" && com.familydocs.app.domain.GroupCodes.normalize(groupCode).length < 6) e["group"] = "Enter the group's code"

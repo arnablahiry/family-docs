@@ -126,7 +126,7 @@ fun WelcomeScreen(onStart: () -> Unit, onSignIn: () -> Unit) {
     }
 }
 
-/** `.register`: name, phone, profile picture, Google account (or email until Google is set up), countries. Also "Your account". */
+/** `.register`: name, profile picture, Google account (or email until Google is set up), countries. Also "Your account". */
 @Composable
 fun RegisterScreen(vm: OnboardingViewModel, onBack: () -> Unit, title: String = "Create account", showStep: Boolean = true,
                    onRestoreInstead: () -> Unit = {}, onNext: () -> Unit) {
@@ -175,23 +175,6 @@ fun RegisterScreen(vm: OnboardingViewModel, onBack: () -> Unit, title: String = 
             }
 
             FdField("Full name", error = e["name"]) { FdInput(vm.name, { vm.name = it }, placeholder = "Your name", icon = "user", error = "name" in e) }
-
-            FdField("Phone number", error = e["phone"]) {
-                var open by remember { mutableStateOf(false) }
-                FdInput(vm.phone, { vm.phone = it }, placeholder = "98765 43210", icon = "phone", error = "phone" in e, keyboardType = KeyboardType.Phone,
-                    leading = {
-                        Box {
-                            Row(Modifier.clip(RoundedCornerShape(8.dp)).tap { open = true }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text(vm.countryCode, style = fdText(15f), modifier = Modifier.padding(end = 2.dp))
-                                FdIconButton("chev", { open = true }, size = 24.dp, iconSize = 14.dp, tint = c.muted, description = "Country code")
-                            }
-                            DropdownMenu(open, { open = false }) {
-                                listOf("+91" to "India", "+30" to "Greece", "+44" to "UK", "+1" to "US / Canada", "+49" to "Germany", "+971" to "UAE", "+65" to "Singapore")
-                                    .forEach { (cc, n) -> DropdownMenuItem({ Text("$cc  $n", style = fdText(14f)) }, { vm.countryCode = cc; open = false }) }
-                            }
-                        }
-                    })
-            }
 
             // ---- Google account: Drive backups and signing in on a new phone ----
             FdField("Google account", error = e["email"], hint = "Backups go to this Google Drive. Signing in with it on a new phone brings everything back.".takeIf { vm.message == null }) {
