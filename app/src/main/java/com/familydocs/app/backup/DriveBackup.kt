@@ -238,7 +238,8 @@ class DriveBackup(
             .put("account", s.account?.let { accountJson(it) } ?: JSONObject.NULL)
             .put("members", JSONArray(s.members.map { memberJson(it) }))
             .put("groups", JSONArray(s.groups.map { JSONObject().put("id", it.id).put("name", it.name).put("code", it.code).put("created", it.createdAt)
-                .put("all", it.backupAll).put("pic", it.pic ?: JSONObject.NULL).put("photo", it.photoFile != null).put("shareFolder", it.shareFolder ?: JSONObject.NULL).put("shareIndex", it.shareIndex ?: JSONObject.NULL).put("peers", it.peers ?: JSONObject.NULL) }))
+                .put("all", it.backupAll).put("pic", it.pic ?: JSONObject.NULL).put("photo", it.photoFile != null).put("shareFolder", it.shareFolder ?: JSONObject.NULL).put("shareIndex", it.shareIndex ?: JSONObject.NULL).put("peers", it.peers ?: JSONObject.NULL)
+                .put("creator", it.creator ?: JSONObject.NULL).put("admins", it.admins ?: JSONObject.NULL).put("adminsAt", it.adminsAt) }))
             .put("documents", JSONArray(s.documents.map { JSONObject().put("id", it.id).put("member", it.memberId).put("order", it.sortOrder ?: JSONObject.NULL) }))
         val indexText = index.toString()
         if (!same("index", sha(indexText))) drive.upsertFile(root, "Lararium vault.fdenc", seal(indexText.toByteArray()), OCTET, mapOf(P_KIND to "index", P_DOC_FILE to "index"),
@@ -322,6 +323,7 @@ class DriveBackup(
         val groups = index.optJSONArray("groups")?.let { a -> (0 until a.length()).map { a.getJSONObject(it) }
             .map { com.familydocs.app.data.GroupEntity(it.getString("id"), it.getString("name"), it.getString("code"), it.optLong("created"),
                 backupAll = it.optBoolean("all"), shareFolder = it.str("shareFolder"), shareIndex = it.str("shareIndex"), peers = it.str("peers"),
+                creator = it.str("creator"), admins = it.str("admins"), adminsAt = it.optLong("adminsAt"),
                 pic = it.str("pic"), photoFile = if (it.optBoolean("photo")) drive.findByProp(P_DOC_FILE, "group:${it.getString("id")}:photo")
                     ?.let { f -> ("g-" + it.getString("id")).also { id -> blobs[id] = open(drive.download(f.id)) } } else null) } }.orEmpty()
         onProgress("Saving to this phone…")

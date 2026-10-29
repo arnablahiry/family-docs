@@ -1,6 +1,7 @@
 package com.familydocs.app.backup
 
 import android.content.Context
+import com.familydocs.app.data.AdminEdits
 import com.familydocs.app.data.Attachment
 import com.familydocs.app.data.DisplayMode
 import com.familydocs.app.data.DocumentEntity
@@ -33,8 +34,13 @@ import org.json.JSONObject
  * only someone with the code can open it. The files are "anyone with the link" because the app's Drive access
  * (drive.file) can't open files other accounts share by email; the file ids travel only inside invites.
  * What others share shows up read-only here, marked with their key ([MemberEntity.origin] / [DocumentEntity.origin]).
+ *
+ * Admins: whoever made the group is its admin and can make others admins. An admin can change another member's documents
+ * and profile, or remove them from the group. Each member's things live in their own vault, so an admin's change is an
+ * "op" in the admin's share addressed to that member; their phone applies it to its own vault (telling them who changed
+ * what), lists it as applied, and the admin's phone then drops it. Until then the admin sees the change on their phone.
  */
-class GroupShare(private val context: Context, private val dao: VaultDao, private val files: FileStore) {
+class GroupShare(private val context: Context, private val dao: VaultDao, private val files: FileStore) : AdminEdits {
     private val prefs = context.getSharedPreferences("group_share", Context.MODE_PRIVATE)
     private val running = Mutex()
 
@@ -48,6 +54,8 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
             onProgress("Sharing ${g0.name}…")
             val g = publish(drive, g0, me)
             g.peerList.forEach { p ->
+                // removed from the group meanwhile (by an admin, read from an earlier share)
+                if (dao.groupNow(g.id)?.peerList?.any { it.key == p.key } != true) return@forEach
                 onProgress("Reading ${p.name}'s share…")
                 runCatching { received += read(g, p, me.id) }.onFailure { e ->
                     problems += "${p.name}: ${e.message}"
@@ -55,6 +63,7 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
                     dao.groupNow(g.id)?.let { now -> dao.upsertGroup(now.copy(peers = Peer.encode(now.peerList.map { if (it.key == p.key) it.copy(err = e.message ?: "Couldn't read") else it }))) }
                 }
             }
+            settleCreator(g.id, me)
         }
         if (problems.isEmpty()) "Group up to date" + if (received > 0) " · $received new or changed" else ""
         else "Some shares couldn't be read (${problems.joinToString("; ")})"
@@ -88,7 +97,8 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
         val text = JSONObject().put("v", 1).put("group", g.id).put("name", g.name).put("from", JSONObject().put("key", me.id).put("name", name))
             .put("members", JSONArray().put(JSONObject().put("id", me.id).put("name", name).put("relation", me.relation).put("kind", "self").put("avatar", me.avatar ?: JSONObject.NULL)))
             .put("documents", JSONArray()).put("passwords", JSONArray())
-            .put("peers", JSONArray(g.peerList.map { JSONObject().put("key", it.key).put("name", it.name).put("index", it.index) })).toString()
+            .put("peers", JSONArray(g.peerList.map { JSONObject().put("key", it.key).put("name", it.name).put("index", it.index) }))
+            .let { meta(it, g, me, null) }.toString()
         val id = drive.upsertFile(folder, "index.fdx", BackupCrypto.seal(text.toByteArray(), key, GroupInvite.salt(g.id)), OCTET, mapOf(P_SHARE_FILE to "${g.id}:index"), null, P_SHARE_FILE)
         drive.shareWithLink(id)
         val out = g.copy(shareFolder = folder, shareIndex = id)
@@ -109,6 +119,7 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
         if (dao.sharedIn(base.id) == null)
             dao.upsertMember(MemberEntity(java.util.UUID.randomUUID().toString(), "Common", "Shared", null, createdAt = 0L, shared = true, groupId = base.id))
         val peer = Peer(inv.from, inv.fromName, inv.index)
+        readmit(base.id, peer.key)
         val g: GroupEntity = base.copy(peers = Peer.encode(base.peerList.filter { it.key != peer.key } + peer))
         dao.upsertGroup(g)
         // Read it now (this also checks the invite works); if the connection fails, the next sync tries again.
@@ -186,6 +197,9 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
             .put("passwords", JSONArray(pws.map { JSONObject().put("id", it.id).put("site", it.site).put("user", it.username).put("pass", it.password).put("created", it.createdAt) }))
             // Who else you read: someone who joins through you finds the rest of the group from here.
             .put("peers", JSONArray(g.peerList.map { JSONObject().put("key", it.key).put("name", it.name).put("index", it.index) }))
+        // admin changes nobody picked up for two months are dropped
+        synchronized(prefs) { ops(g.id).let { all -> all.filter { System.currentTimeMillis() - it.optLong("at") < OP_LIFE }.let { if (it.size != all.size) saveOps(g.id, it) } } }
+        meta(index, g, me, ::upload)
         val text = index.toString()
         val hash = sha(text)
         var out = g
@@ -214,23 +228,37 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
         val prefix = "s:${g.id}:${p.key}:"
         val common = dao.sharedIn(g.id)
         var changed = 0
+        // Your admin changes their phone has taken over: drop them (their version is read below).
+        val retired = retire(g.id, p.key, j.optJSONArray("applied"))
+        // Your admin changes still waiting for their phone: shown here instead of what their share says.
+        val pending = ops(g.id).filter { it.optString("to") == p.key }
+        val pendingDocs = pending.filter { it.optString("kind") == "doc" }.map { prefix + it.getJSONObject("doc").getString("id") }.toSet()
+        val pendingDel = pending.filter { it.optString("kind") == "deldoc" }.map { prefix + it.optString("doc") }.toSet()
+        val pendingProfile = pending.lastOrNull { it.optString("kind") == "profile" }
 
         val memberIds = mutableMapOf<String, String>()
         val keepMembers = mutableSetOf<String>()
         j.getJSONArray("members").forEachObj { m ->
             val kind = m.optString("kind")
             if (kind == "common") { common?.let { memberIds[m.getString("id")] = it.id }; return@forEachObj }
+            // Only the account holder themselves: people their phone made up (older versions) are not group members.
+            if (kind != "self") return@forEachObj
             val id = prefix + m.getString("id")
             memberIds[m.getString("id")] = id; keepMembers += id
             val photo = m.optStringOrNull("photo")?.let { fetch(it) }
-            dao.upsertMember(MemberEntity(id, m.getString("name"), if (kind == "self") "Group member" else m.optString("relation"), photo,
-                createdAt = 1L, avatar = m.optStringOrNull("avatar"), groupId = g.id, origin = p.key))
+            var row = MemberEntity(id, m.getString("name"), "Group member", photo, createdAt = 1L, avatar = m.optStringOrNull("avatar"), groupId = g.id, origin = p.key)
+            pendingProfile?.let { op -> row = row.copy(name = op.optStringOrNull("name") ?: row.name, avatar = op.optStringOrNull("avatar") ?: row.avatar,
+                photoFile = if (op.has("photo")) op.optString("photo").ifEmpty { null } else row.photoFile) }
+            dao.upsertMember(row)
         }
 
         val keepDocs = mutableSetOf<String>()
         j.getJSONArray("documents").forEachObj { d ->
             val member = memberIds[d.getString("member")] ?: return@forEachObj
-            val id = prefix + d.getString("id"); keepDocs += id
+            val id = prefix + d.getString("id")
+            if (id in pendingDel) return@forEachObj
+            keepDocs += id
+            if (id in pendingDocs) return@forEachObj
             val existing = dao.documentNow(id)
             val atts = mutableListOf<Attachment>()
             d.getJSONArray("files").forEachObj { f -> fetch(f.getString("f"))?.let { atts += Attachment(it, f.optString("mime", "image/jpeg")) } }
@@ -251,15 +279,302 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
             val id = prefix + w.getString("id"); keepPws += id
             dao.upsertPassword(PasswordEntity(id, common.id, w.getString("site"), w.getString("user"), w.getString("pass"), w.optLong("created"), origin = p.key))
         }
-        removeFrom(g, p.key, keepDocs, keepMembers, keepPws)
+        removeFrom(g, p.key, keepDocs + pendingDocs, keepMembers, keepPws)
+        cleanup(retired)
 
-        // Their name may have changed, and they may know members you don't yet.
-        val now = dao.groupNow(g.id) ?: g
+        // ---- admins: who made the group, who else is an admin, removals, and changes an admin made to your things ----
+        j.optLong("since").takeIf { it > 0 }?.let { prefs.edit().putLong("since:${g.id}:${p.key}", it).apply() }
+        var grp = dao.groupNow(g.id) ?: g
+        if (grp.creator == null) j.optStringOrNull("creator")?.let { grp = grp.copy(creator = it); dao.upsertGroup(grp) }
+        val by = from.optString("name", p.name)
+        if (p.key in grp.adminKeys) {
+            j.optJSONObject("admins")?.let { a ->
+                val at = a.optLong("at")
+                if (at > grp.adminsAt) {
+                    val keys = a.optJSONArray("keys")?.let { ks -> (0 until ks.length()).map { ks.getString(it) } }.orEmpty().filter { it != grp.creator }
+                    val was = myKey in grp.adminKeys
+                    grp = grp.copy(admins = keys.joinToString(",").ifEmpty { null }, adminsAt = at); dao.upsertGroup(grp)
+                    val isNow = myKey in grp.adminKeys
+                    if (isNow && !was) addNotice(grp, by, "$by made you an admin of ${grp.name}: you can change everyone's documents and profiles, and add or remove admins and members.")
+                    if (was && !isNow) addNotice(grp, by, "$by took away your admin role in ${grp.name}.")
+                }
+            }
+            var removedMe = false
+            j.optJSONObject("removed")?.let { r ->
+                val handled = synchronized(prefs) { longMap("handled:${g.id}") }
+                r.keys().forEach { rk ->
+                    val at = r.optLong(rk)
+                    if (at > (handled[rk] ?: 0L)) {
+                        handled[rk] = at
+                        if (rk == myKey) removedMe = true else if (rk != p.key && rk != grp.creator) forget(g.id, rk)
+                    }
+                }
+                synchronized(prefs) { putLongMap("handled:${g.id}", longMap("handled:${g.id}").apply { putAll(handled) }) }
+            }
+            if (removedMe) { leave(grp, by); return changed }
+            changed += applyOps(grp, j, by, myKey, k)
+        }
+
+        // Their name may have changed, and they may know members you don't yet (not people an admin just removed).
+        val now = dao.groupNow(g.id) ?: grp
         val known = now.peerList.associateBy { it.key }.toMutableMap()
-        known[p.key] = p.copy(name = from.optString("name", p.name), at = System.currentTimeMillis(), err = null)
-        j.optJSONArray("peers")?.forEachObj { o -> val k = o.getString("key"); if (k != myKey && k !in known) known[k] = Peer(k, o.optString("name"), o.getString("index")) }
+        known[p.key] = p.copy(name = by, at = System.currentTimeMillis(), err = null)
+        val gone = synchronized(prefs) { longMap("handled:${g.id}") }
+        j.optJSONArray("peers")?.forEachObj { o -> val pk = o.getString("key")
+            if (pk != myKey && pk !in known && System.currentTimeMillis() - (gone[pk] ?: 0L) > REMOVED_QUIET) known[pk] = Peer(pk, o.optString("name"), o.getString("index")) }
         dao.upsertGroup(now.copy(peers = Peer.encode(known.values.toList())))
         return changed
+    }
+
+    // ---------------- admins ----------------
+
+    /** Something an admin changed in your things (or about you), shown on Home until you close it. */
+    data class Notice(val id: String, val groupId: String, val by: String, val text: String, val at: Long)
+    val notices = kotlinx.coroutines.flow.MutableStateFlow(loadNotices())
+    fun dismissNotice(id: String) = synchronized(prefs) { saveNotices(notices.value.filter { it.id != id }) }
+    private fun loadNotices(): List<Notice> = runCatching {
+        val a = JSONArray(prefs.getString("notices", "[]"))
+        (0 until a.length()).map { a.getJSONObject(it).let { o -> Notice(o.getString("id"), o.optString("g"), o.optString("by"), o.getString("t"), o.optLong("at")) } }
+    }.getOrDefault(emptyList())
+    private fun saveNotices(list: List<Notice>) {
+        prefs.edit().putString("notices", JSONArray(list.map { JSONObject().put("id", it.id).put("g", it.groupId).put("by", it.by).put("t", it.text).put("at", it.at) }).toString()).apply()
+        notices.value = list
+    }
+    private fun addNotice(g: GroupEntity, by: String, text: String) = synchronized(prefs) {
+        saveNotices((notices.value + Notice(java.util.UUID.randomUUID().toString(), g.id, by, text, System.currentTimeMillis())).takeLast(20))
+    }
+
+    private fun jsonList(key: String): MutableList<JSONObject> = runCatching {
+        val a = JSONArray(prefs.getString(key, null) ?: return mutableListOf()); (0 until a.length()).map { a.getJSONObject(it) }.toMutableList()
+    }.getOrDefault(mutableListOf())
+    private fun longMap(key: String): MutableMap<String, Long> = runCatching {
+        val o = JSONObject(prefs.getString(key, null) ?: return mutableMapOf()); o.keys().asSequence().associateWith { o.optLong(it) }.toMutableMap()
+    }.getOrDefault(mutableMapOf())
+    private fun putLongMap(key: String, m: Map<String, Long>) { prefs.edit().putString(key, JSONObject().apply { m.forEach { (k, v) -> put(k, v) } }.toString()).apply() }
+    /** Your admin changes for other members of group [gid], not yet taken over by their phones. */
+    private fun ops(gid: String) = jsonList("ops:$gid")
+    private fun saveOps(gid: String, list: List<JSONObject>) { prefs.edit().putString("ops:$gid", JSONArray(list).toString()).apply() }
+    /** Ids of admin changes this phone has applied to your own things (the admin's phone stops sending them). */
+    private fun applied(gid: String): MutableList<String> = runCatching {
+        val a = JSONArray(prefs.getString("applied:$gid", null) ?: return mutableListOf()); (0 until a.length()).map { a.getString(it) }.toMutableList()
+    }.getOrDefault(mutableListOf())
+    private fun docIdOf(op: JSONObject) = op.optJSONObject("doc")?.optString("id") ?: op.optString("doc")
+    private fun newOp(to: String, kind: String) = JSONObject().put("id", java.util.UUID.randomUUID().toString()).put("to", to).put("at", System.currentTimeMillis()).put("kind", kind)
+    private fun addOp(gid: String, op: JSONObject, replaces: (JSONObject) -> Boolean = { false }) = synchronized(prefs) { saveOps(gid, ops(gid).filterNot(replaces) + op) }
+
+    private suspend fun requireAdmin(gid: String) {
+        val g = dao.groupNow(gid) ?: error("Group not found")
+        require(g.isAdmin(dao.selfNow()?.id)) { "Only a group admin can change other members' things" }
+    }
+
+    /** Whether [key] was removed from group [groupId] after [at] (an old request of theirs mustn't bring them back). */
+    fun removedSince(groupId: String, key: String, at: Long): Boolean = synchronized(prefs) { (longMap("handled:$groupId")[key] ?: 0L) > at }
+
+    /** Someone is added again (an invite, an approved request): earlier removals of them no longer count. */
+    private fun readmit(gid: String, key: String) = synchronized(prefs) {
+        val removed = longMap("removed:$gid"); if (removed.remove(key) != null) putLongMap("removed:$gid", removed)
+        putLongMap("handled:$gid", longMap("handled:$gid").apply { put(key, System.currentTimeMillis()) })
+    }
+
+    override suspend fun putDoc(row: DocumentEntity, member: MemberEntity) {
+        val gid = member.groupId ?: return; val to = row.origin ?: return
+        requireAdmin(gid)
+        val docId = row.id.removePrefix("s:$gid:$to:")
+        val d = JSONObject().put("id", docId).put("common", member.shared).put("name", row.name).put("fields", row.fieldsJson).put("text", row.rawText)
+            .put("ocr", row.readByOcr).put("country", row.country ?: JSONObject.NULL).put("display", row.display.name).put("flag", row.showFlag ?: JSONObject.NULL)
+            .put("created", row.createdAt).put("updated", row.updatedAt)
+            .put("files", JSONArray(row.attachments.map { JSONObject().put("id", it.id).put("mime", it.mime) })).put("picture", row.pictureFile ?: JSONObject.NULL)
+        addOp(gid, newOp(to, "doc").put("doc", d)) { it.optString("to") == to && it.optString("kind") in DOC_KINDS && docIdOf(it) == docId }
+        BackupWorker.soon(context)
+    }
+
+    override suspend fun deleteDoc(row: DocumentEntity, member: MemberEntity?) {
+        val to = row.origin ?: return
+        val gid = member?.groupId ?: row.id.split(':').getOrNull(1) ?: return
+        requireAdmin(gid)
+        val docId = row.id.removePrefix("s:$gid:$to:")
+        addOp(gid, newOp(to, "deldoc").put("doc", docId).put("name", row.name)) { it.optString("to") == to && it.optString("kind") in DOC_KINDS && docIdOf(it) == docId }
+        BackupWorker.soon(context)
+    }
+
+    override suspend fun profile(row: MemberEntity, photoChanged: Boolean) {
+        val gid = row.groupId ?: return; val to = row.origin ?: return
+        requireAdmin(gid)
+        val op = newOp(to, "profile").put("name", row.name).put("avatar", row.avatar ?: JSONObject.NULL)
+        if (photoChanged) op.put("photo", row.photoFile ?: "")
+        addOp(gid, op)
+        BackupWorker.soon(context)
+    }
+
+    /** Removes [key] from the group: their phone leaves it, everyone else's stops reading their share. */
+    override suspend fun removeMember(groupId: String, key: String) = withContext(Dispatchers.IO) {
+        requireAdmin(groupId)
+        val g = dao.groupNow(groupId) ?: return@withContext
+        require(key != g.creator) { "The person who made the group can't be removed" }
+        val now = System.currentTimeMillis()
+        synchronized(prefs) {
+            putLongMap("removed:$groupId", longMap("removed:$groupId").apply { put(key, now) })
+            putLongMap("handled:$groupId", longMap("handled:$groupId").apply { put(key, now) })
+            saveOps(groupId, ops(groupId).filter { it.optString("to") != key })
+        }
+        forget(groupId, key)
+        dao.groupNow(groupId)?.let { if (key in it.adminKeys) dao.upsertGroup(it.copy(admins = (it.adminKeys - key - setOfNotNull(it.creator)).joinToString(",").ifEmpty { null }, adminsAt = now)) }
+        BackupWorker.soon(context)
+    }
+
+    /** Makes [key] an admin of the group, or takes it back (not from the person who made the group). */
+    suspend fun setAdmin(groupId: String, key: String, on: Boolean) = withContext(Dispatchers.IO) {
+        requireAdmin(groupId)
+        val g = dao.groupNow(groupId) ?: return@withContext
+        if (key == g.creator) return@withContext
+        val others = g.adminKeys - setOfNotNull(g.creator)
+        val next = if (on) others + key else others - key
+        dao.upsertGroup(g.copy(admins = next.joinToString(",").ifEmpty { null }, adminsAt = System.currentTimeMillis()))
+        BackupWorker.soon(context)
+    }
+
+    /** Admin details in a share index: when you got the group, who made it, the admins, and the admin changes. */
+    private fun meta(o: JSONObject, g: GroupEntity, me: MemberEntity, upload: ((String?) -> String?)?): JSONObject {
+        o.put("since", g.createdAt).put("creator", g.creator ?: JSONObject.NULL)
+            .put("admins", JSONObject().put("keys", JSONArray((g.adminKeys - setOfNotNull(g.creator)).toList())).put("at", g.adminsAt))
+            .put("applied", JSONArray(synchronized(prefs) { applied(g.id) }))
+        if (g.isAdmin(me.id)) {
+            o.put("removed", JSONObject().apply { synchronized(prefs) { longMap("removed:${g.id}") }.forEach { (k, v) -> put(k, v) } })
+            if (upload != null) o.put("ops", JSONArray(synchronized(prefs) { ops(g.id) }.mapNotNull { wire(it, upload) }))
+        }
+        return o
+    }
+
+    /** An op as it goes into the share: this phone's file ids become the uploaded Drive files. */
+    private fun wire(op: JSONObject, upload: (String?) -> String?): JSONObject? {
+        val w = JSONObject(op.toString())
+        when (op.optString("kind")) {
+            "doc" -> {
+                val d = w.getJSONObject("doc")
+                val fs = d.getJSONArray("files"); val out = JSONArray()
+                for (i in 0 until fs.length()) { val f = fs.getJSONObject(i); out.put(JSONObject().put("f", upload(f.getString("id")) ?: return null).put("mime", f.optString("mime"))) }
+                d.put("files", out)
+                if (!d.isNull("picture")) d.put("picture", upload(d.getString("picture")) ?: return null)
+            }
+            "profile" -> if (w.optString("photo").isNotEmpty()) w.put("photo", upload(w.getString("photo")) ?: return null)
+        }
+        return w
+    }
+
+    /** An admin's changes addressed to you, from their share: applied to your own vault, then a note on Home. */
+    private suspend fun applyOps(g: GroupEntity, j: JSONObject, by: String, myKey: String, key: ByteArray): Int {
+        val list = j.optJSONArray("ops") ?: return 0
+        val done = synchronized(prefs) { applied(g.id) }
+        val before = done.size
+        val what = mutableListOf<String>()
+        for (i in 0 until list.length()) {
+            val op = list.getJSONObject(i)
+            if (op.optString("to") != myKey || op.optString("id") in done) continue
+            val r = runCatching { applyOp(g, op, key) }
+            if (r.isFailure) continue // (a file didn't download: tried again next time)
+            done += op.getString("id"); r.getOrNull()?.let { what += it }
+        }
+        if (done.size != before) synchronized(prefs) { prefs.edit().putString("applied:${g.id}", JSONArray(done.takeLast(300)).toString()).apply() }
+        if (what.isNotEmpty()) {
+            addNotice(g, by, "$by (admin of ${g.name}) made changes: ${what.joinToString("; ")}.")
+            BackupWorker.soon(context) // your share and backup now carry them
+        }
+        return what.size
+    }
+
+    private suspend fun applyOp(g: GroupEntity, op: JSONObject, key: ByteArray): String? {
+        fun need(driveId: String) = fetchFile(driveId, key) ?: error("Couldn't download a file")
+        when (op.optString("kind")) {
+            "profile" -> {
+                val self = dao.selfNow() ?: error("No account on this phone"); val acct = dao.accountNow()
+                var s = self; val what = mutableListOf<String>()
+                op.optStringOrNull("name")?.trim()?.takeIf { it.isNotEmpty() && it != (acct?.name ?: self.name) }?.let { s = s.copy(name = it); what += "your name is now $it" }
+                if (op.has("photo")) {
+                    val ph = op.optString("photo"); val id = if (ph.isEmpty()) null else need(ph)
+                    if (id != self.photoFile) {
+                        setOfNotNull(self.photoFile, acct?.photoFile).filter { it != id }.forEach { files.delete(it) }
+                        s = s.copy(photoFile = id); what += if (id == null) "removed your photo" else "changed your photo"
+                    }
+                }
+                op.optStringOrNull("avatar")?.takeIf { it != self.avatar }?.let { s = s.copy(avatar = it); if (s.photoFile == null) what += "changed your picture" }
+                if (s != self) { dao.upsertMember(s); acct?.let { dao.upsertAccount(it.copy(name = s.name, photoFile = s.photoFile)) } }
+                return what.joinToString(", ").ifEmpty { null }
+            }
+            "doc" -> {
+                val d = op.getJSONObject("doc"); val id = d.getString("id")
+                val old = dao.documentNow(id)
+                require(old == null || old.origin == null) { "Not one of yours" }
+                val member = old?.memberId ?: ((if (d.optBoolean("common")) dao.sharedIn(g.id) else dao.selfNow()) ?: error("No vault for it")).id
+                val atts = mutableListOf<Attachment>()
+                d.getJSONArray("files").forEachObj { f -> atts += Attachment(need(f.getString("f")), f.optString("mime", "image/jpeg")) }
+                val pic = d.optStringOrNull("picture")?.let { need(it) }
+                old?.let { o -> (o.attachments.map { it.id } + listOfNotNull(o.pictureFile)).filter { f -> atts.none { it.id == f } && f != pic }.forEach { files.delete(it) } }
+                dao.upsertDocument(DocumentEntity(
+                    id = id, memberId = member, name = d.getString("name"), fileId = atts.firstOrNull()?.id, fileMime = atts.firstOrNull()?.mime,
+                    display = runCatching { DisplayMode.valueOf(d.getString("display")) }.getOrDefault(DisplayMode.ICON),
+                    pictureFile = pic, fieldsJson = d.optString("fields", "[]"), rawText = d.optString("text"), readByOcr = d.optBoolean("ocr"),
+                    country = d.optStringOrNull("country"), createdAt = old?.createdAt ?: d.optLong("created", System.currentTimeMillis()),
+                    updatedAt = d.optLong("updated", System.currentTimeMillis()), showFlag = if (d.isNull("flag")) null else d.optBoolean("flag"),
+                    moreFiles = Attachment.encode(atts.drop(1)), sortOrder = old?.sortOrder, origin = null,
+                ))
+                return "${if (old == null) "added" else "edited"} “${d.getString("name")}”"
+            }
+            "deldoc" -> {
+                val old = dao.documentNow(op.optString("doc"))?.takeIf { it.origin == null } ?: return null
+                old.attachments.forEach { files.delete(it.id) }; files.delete(old.pictureFile); dao.deleteDocument(old.id)
+                return "removed “${old.name}”"
+            }
+            else -> return null
+        }
+    }
+
+    /** Admin changes [peerKey]'s phone lists as applied: no longer sent. Returns them, for [cleanup]. */
+    private fun retire(gid: String, peerKey: String, theirs: JSONArray?): List<JSONObject> {
+        theirs ?: return emptyList()
+        val done = (0 until theirs.length()).map { theirs.getString(it) }.toSet()
+        return synchronized(prefs) {
+            val (out, keep) = ops(gid).partition { it.optString("to") == peerKey && it.optString("id") in done }
+            if (out.isNotEmpty()) saveOps(gid, keep)
+            out
+        }
+    }
+
+    /** This phone's copies of files that only finished admin changes still pointed to. */
+    private suspend fun cleanup(gone: List<JSONObject>) {
+        if (gone.isEmpty()) return
+        val ids = gone.flatMap { op ->
+            val d = op.optJSONObject("doc")
+            val fs = d?.optJSONArray("files")?.let { a -> (0 until a.length()).map { a.getJSONObject(it).getString("id") } }.orEmpty()
+            fs + listOfNotNull(d?.optStringOrNull("picture"), op.optStringOrNull("photo"))
+        }.toSet()
+        if (ids.isEmpty()) return
+        val used = mutableSetOf<String>()
+        dao.allDocumentsNow().forEach { d -> d.attachments.forEach { used += it.id }; d.pictureFile?.let { used += it } }
+        dao.membersNow().forEach { m -> m.photoFile?.let { used += it } }
+        dao.accountNow()?.photoFile?.let { used += it }
+        dao.groupsNow().forEach { g -> g.photoFile?.let { used += it }; ops(g.id).forEach { op -> op.optJSONObject("doc")?.optJSONArray("files")?.let { a -> for (i in 0 until a.length()) used += a.getJSONObject(i).getString("id") } } }
+        (ids - used).forEach { files.delete(it) }
+    }
+
+    /** An admin removed you: the group stays on this phone with your own things, without the others. */
+    private suspend fun leave(g: GroupEntity, by: String) {
+        g.peerList.forEach { removeFrom(g, it.key, emptySet(), emptySet(), emptySet()) }
+        dao.upsertGroup(g.copy(peers = null, creator = null, admins = null, adminsAt = 0L))
+        synchronized(prefs) { saveOps(g.id, emptyList()) }
+        addNotice(g, by, "$by removed you from ${g.name}. Your own documents and the Common vault stay on this phone. If it was a mistake, ask to join again with the group's code.")
+    }
+
+    /**
+     * Who made the group, for groups from before admins: the member who has had it longest (their "since"), once
+     * everyone's app says. Alone in a group, it's you.
+     */
+    private suspend fun settleCreator(gid: String, me: MemberEntity) {
+        val g = dao.groupNow(gid) ?: return
+        if (g.creator != null) return
+        val since = g.peerList.associate { it.key to prefs.getLong("since:$gid:${it.key}", 0L) }
+        if (since.values.any { it == 0L }) return
+        val creator = (since + (me.id to g.createdAt)).minByOrNull { it.value }!!.key
+        dao.upsertGroup(g.copy(creator = creator))
     }
 
     private suspend fun removeFrom(g: GroupEntity, key: String, keepDocs: Set<String>, keepMembers: Set<String>, keepPws: Set<String>) {
@@ -284,6 +599,10 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
 
     companion object {
         const val P_SHARE = "fd_share"; const val P_SHARE_FILE = "fd_share_file"
+        private val DOC_KINDS = setOf("doc", "deldoc")
+        private const val OP_LIFE = 60L * 24 * 3600 * 1000
+        /** For a week after someone is removed, other members' (older) lists of who's in the group don't bring them back. */
+        private const val REMOVED_QUIET = 7L * 24 * 3600 * 1000
         private const val OCTET = "application/octet-stream"
     }
 }

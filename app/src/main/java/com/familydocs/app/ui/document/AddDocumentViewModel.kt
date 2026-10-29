@@ -180,10 +180,12 @@ class AddDocumentViewModel(private val c: AppContainer, private val appContext: 
                 name = name.trim(), fileId = fileId, fileMime = stored.firstOrNull()?.mime, moreFiles = Attachment.encode(stored.drop(1)), display = display, pictureFile = pictureId,
                 rawText = rawText, readByOcr = ocr is OcrState.Done, country = country, showFlag = showFlagChoice,
             )
-            c.repo.saveDocument(doc, fields.filter { it.label.isNotBlank() || it.value.isNotBlank() }.map {
+            val r = runCatching { c.repo.saveDocument(doc, fields.filter { it.label.isNotBlank() || it.value.isNotBlank() }.map {
                 DocField(it.label.trim(), it.value.trim(), DocTypes.isSensitive(it.label), it.auto, it.verified)
-            })
+            }) }
             saving = false
+            // (another member's document and you're no longer an admin)
+            r.exceptionOrNull()?.let { android.widget.Toast.makeText(appContext, it.message ?: "Couldn't save", android.widget.Toast.LENGTH_LONG).show(); return@launch }
             onSaved()
         }
     }

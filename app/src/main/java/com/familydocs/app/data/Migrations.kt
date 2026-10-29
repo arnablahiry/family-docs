@@ -95,6 +95,15 @@ val MIGRATION_7_8 = object : Migration(7, 8) {
     }
 }
 
+/** Version 9: group admins (who made the group, who else is an admin). */
+val MIGRATION_8_9 = object : Migration(8, 9) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE vault_groups ADD COLUMN creator TEXT")
+        db.execSQL("ALTER TABLE vault_groups ADD COLUMN admins TEXT")
+        db.execSQL("ALTER TABLE vault_groups ADD COLUMN adminsAt INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
 val ALL_MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_1_2,
     MIGRATION_2_3,
@@ -103,4 +112,5 @@ val ALL_MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_5_6,
     MIGRATION_6_7,
     MIGRATION_7_8,
+    MIGRATION_8_9,
 )

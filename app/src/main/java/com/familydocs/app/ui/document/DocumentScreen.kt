@@ -99,9 +99,12 @@ fun DocumentScreen(docId: String, onBack: () -> Unit, onEdit: (memberId: String)
     // Shared by another member of the group: read-only here (they edit it on their phone).
     val groups by app.repo.groups.collectAsStateWithLifecycle(emptyList())
     val sharedBy = d.origin?.let { o -> groups.flatMap { it.peerList }.firstOrNull { it.key == o }?.name ?: "another member" }
+    // ...unless you're an admin of the group: then you can change or remove it, and their phone takes that over.
+    val admin = com.familydocs.app.ui.components.rememberIsAdmin(com.familydocs.app.ui.components.groupOfShared(d.id) ?: member?.groupId)
+    val canEdit = sharedBy == null || admin
 
     Column(Modifier.fillMaxSize().background(c.bg).statusBarsPadding()) {
-        FdTopBar("", onBack) { if (sharedBy == null) FdIconButton("edit", { onEdit(d.memberId) }, iconSize = 20.dp, description = "Edit document") }
+        FdTopBar("", onBack) { if (canEdit) FdIconButton("edit", { onEdit(d.memberId) }, iconSize = 20.dp, description = "Edit document") }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).navigationBarsPadding()) {
             // `.dhead`
             Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -143,11 +146,12 @@ fun DocumentScreen(docId: String, onBack: () -> Unit, onEdit: (memberId: String)
             // `.meta`
             Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 FdIcon(if (sharedBy != null) "people" else if (d.readByOcr) "sparkle" else "edit", 14.dp, tint = c.muted)
-                Text(if (sharedBy != null) "Shared by $sharedBy · read-only here, they keep it up to date"
+                Text(if (sharedBy != null && admin) "Shared by $sharedBy · as a group admin you can change it; their phone takes it over"
+                     else if (sharedBy != null) "Shared by $sharedBy · read-only here, they keep it up to date"
                      else "Added ${fmtDate(d.createdAt)} · ${if (d.readByOcr) "details read from the file" else "entered by hand"}", style = fdText(11.5f, color = c.muted))
             }
             // `.actions`
-            if (sharedBy == null) Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 24.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (canEdit) Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 24.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 FdButton("Edit", { onEdit(d.memberId) }, Modifier.weight(1f), BtnKind.Ghost, icon = "edit")
                 FdButton("Delete", { confirmDelete = true }, Modifier.weight(1f), BtnKind.Ghost, icon = "trash", contentColor = c.danger)
             }
@@ -193,8 +197,12 @@ fun DocumentScreen(docId: String, onBack: () -> Unit, onEdit: (memberId: String)
     }
 
     if (confirmDelete) FdConfirmSheet(
-        "Delete this document?", "The file and its details are removed from this phone. Copies in older Drive backups are kept until they expire.", "Delete",
-        onConfirm = { scope.launch { app.repo.deleteDocument(d.id); confirmDelete = false; toast.show("Deleted"); onBack() } },
+        "Delete this document?", if (sharedBy != null) "It's removed from $sharedBy's vault too, the next time their phone syncs (they'll see a note that you removed it)."
+            else "The file and its details are removed from this phone. Copies in older Drive backups are kept until they expire.", "Delete",
+        onConfirm = { scope.launch {
+            confirmDelete = false
+            runCatching { app.repo.deleteDocument(d.id) }.onSuccess { toast.show("Deleted"); onBack() }.onFailure { toast.show(it.message ?: "Couldn't delete") }
+        } },
         onDismiss = { confirmDelete = false },
     )
 }

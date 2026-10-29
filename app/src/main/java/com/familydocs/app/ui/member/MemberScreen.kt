@@ -138,10 +138,13 @@ fun MemberScreen(memberId: String, onBack: () -> Unit, onEdit: () -> Unit, onPas
             .statusBarsPadding(),
     ) {
         // Rubber band for the wallet: dragging past the top/bottom spreads/squishes the cards; letting go springs them back.
+        // Another member's vault: only a group admin can add or change things in it (their phone takes the changes over).
+        val adminHere = com.familydocs.app.ui.components.rememberIsAdmin(m.groupId)
+        val canEdit = m.origin == null || adminHere
         val rubber = remember { RubberBand(scope) }
         CompositionLocalProvider(LocalOverscrollConfiguration provides null) {
         LazyColumn(Modifier.fillMaxSize().nestedScroll(rubber), state = list, contentPadding = PaddingValues(bottom = 120.dp)) {
-            item { FdTopBar("", onBack) { if (m.origin == null) FdIconButton("edit", onEdit, iconSize = 20.dp, description = "Edit ${m.name}") } }
+            item { FdTopBar("", onBack) { if (canEdit) FdIconButton("edit", onEdit, iconSize = 20.dp, description = "Edit ${m.name}") } }
             // ---- hero ----
             item {
                 Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -231,8 +234,8 @@ fun MemberScreen(memberId: String, onBack: () -> Unit, onEdit: () -> Unit, onPas
             }
         }
         }
-        // Someone shared by another member of the group: read-only here (they add documents on their phone).
-        if (m.origin == null) FdFab("Add document", "plus", onAddDocument, Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 18.dp, bottom = 18.dp))
+        // Another member of the group: read-only here (they add documents on their phone), unless you're a group admin.
+        if (canEdit) FdFab("Add document", "plus", onAddDocument, Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 18.dp, bottom = 18.dp))
     }
 }
 

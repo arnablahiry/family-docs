@@ -21,9 +21,22 @@ fun presetFor(name: String): FamilyPreset? = FAMILY_PRESET.firstOrNull { name.tr
 
 val CHARACTER_KEYS = listOf("char_blue_short", "char_peach_bun", "char_lilac_long", "char_mint_glasses", "char_sand_bun", "char_rose_long", "char_sky_short", "char_slate_glasses")
 
+/**
+ * A group admin's changes to another member's things (their documents, their profile, removing them). The change shows
+ * here straight away; [com.familydocs.app.backup.GroupShare] passes it to their phone, which applies it to their own vault.
+ */
+interface AdminEdits {
+    suspend fun putDoc(row: DocumentEntity, member: MemberEntity)
+    suspend fun deleteDoc(row: DocumentEntity, member: MemberEntity?)
+    suspend fun profile(row: MemberEntity, photoChanged: Boolean)
+    suspend fun removeMember(groupId: String, key: String)
+}
+
 class VaultRepository(private val dao: VaultDao, val files: FileStore) {
     /** Called after anything the backup covers is added, changed or deleted (AppContainer queues a Drive backup). */
     var onChanged: () -> Unit = {}
+    /** Where admin changes to other members' things go (set by AppContainer). */
+    var admin: () -> AdminEdits? = { null }
 
     val account: Flow<AccountEntity?> = dao.account()
 
@@ -46,8 +59,9 @@ class VaultRepository(private val dao: VaultDao, val files: FileStore) {
     /** A new group with its own Common vault and a fresh code. */
     suspend fun createGroup(name: String, pic: String? = null, photo: ByteArray? = null): GroupEntity = withContext(Dispatchers.IO) {
         val n = name.trim().ifBlank { "Family" }
+        // You made it, so you're its admin (during sign-up "you" don't exist yet: saveAccount fills it in).
         val g = GroupEntity(UUID.randomUUID().toString(), n, com.familydocs.app.domain.GroupCodes.new(),
-            pic = pic ?: com.familydocs.app.domain.GroupPics.DEFAULT, photoFile = photo?.let { files.put(it) })
+            pic = pic ?: com.familydocs.app.domain.GroupPics.DEFAULT, photoFile = photo?.let { files.put(it) }, creator = dao.selfNow()?.id)
         dao.upsertGroup(g)
         dao.upsertMember(MemberEntity(UUID.randomUUID().toString(), "Common", "Shared", photoFile = null, createdAt = 0L, shared = true, groupId = g.id))
         onChanged()
@@ -109,6 +123,8 @@ class VaultRepository(private val dao: VaultDao, val files: FileStore) {
             (self ?: MemberEntity(id = UUID.randomUUID().toString(), name = name, relation = "You", photoFile = null, isSelf = true, avatar = DEFAULT_SELF_AVATAR))
                 .let { it.copy(name = name, photoFile = photoId, avatar = avatar ?: it.avatar ?: DEFAULT_SELF_AVATAR) },
         )
+        // Groups made on this phone before "you" existed (sign-up): you made them, so you're their admin.
+        dao.selfNow()?.let { me -> dao.groupsNow().filter { it.creator == null && it.peerList.isEmpty() }.forEach { dao.upsertGroup(it.copy(creator = me.id)) } }
         // Every group gets one Common vault (rent, bills, Wi-Fi...) that all its account holders share.
         if (dao.sharedIn(groupId.value) == null) {
             dao.upsertMember(MemberEntity(UUID.randomUUID().toString(), "Common", "Shared", photoFile = null, createdAt = 0L, shared = true, groupId = groupId.value))
@@ -120,6 +136,24 @@ class VaultRepository(private val dao: VaultDao, val files: FileStore) {
         val docs = dao.allDocumentsNow().map { it.memberId }.toSet(); val pws = dao.allPasswordsNow().map { it.memberId }.toSet()
         dao.membersNow().filter { !it.isSelf && !it.shared && it.origin == null && it.id !in docs && it.id !in pws }
             .forEach { files.delete(it.photoFile); dao.deleteMember(it.id) }
+    }
+
+    /**
+     * Only account holders (and Common) are people. Anyone else made on this phone (the old preset family) goes:
+     * their documents move to the group's Common vault and their logins to you, so nothing is lost.
+     */
+    suspend fun foldLocalPeople() = withContext(Dispatchers.IO) {
+        val self = dao.selfNow() ?: return@withContext
+        val extra = dao.membersNow().filter { !it.isSelf && !it.shared && it.origin == null }
+        if (extra.isEmpty()) return@withContext
+        val pws = dao.allPasswordsNow()
+        extra.forEach { m ->
+            val home = dao.sharedIn(m.groupId) ?: self
+            dao.documentsNow(m.id).forEach { dao.upsertDocument(it.copy(memberId = home.id)) }
+            pws.filter { it.memberId == m.id }.forEach { dao.upsertPassword(it.copy(memberId = self.id)) }
+            files.delete(m.photoFile); dao.deleteMemberRow(m.id)
+        }
+        onChanged()
     }
 
     /**
@@ -150,8 +184,16 @@ class VaultRepository(private val dao: VaultDao, val files: FileStore) {
             keepPhoto -> old?.photoFile
             else -> null
         }
-        old?.photoFile?.takeIf { it != photoId }?.let { files.delete(it) }
         val chosenAvatar = avatar ?: old?.avatar ?: nextCharacter()
+        // Another member's profile: only an admin gets here; their phone takes the change over.
+        if (old?.origin != null) {
+            val row = old.copy(name = name, photoFile = photoId, avatar = chosenAvatar)
+            admin()?.profile(row, photoChanged = photoId != old.photoFile) ?: error("Only a group admin can change this")
+            if (photoId != old.photoFile) files.delete(old.photoFile)
+            dao.upsertMember(row)
+            return@withContext
+        }
+        old?.photoFile?.takeIf { it != photoId }?.let { files.delete(it) }
         dao.upsertMember(
             old?.copy(name = name, relation = relation, photoFile = photoId, avatar = chosenAvatar)
                 ?: MemberEntity(UUID.randomUUID().toString(), name, relation, photoId, avatar = chosenAvatar, groupId = groupId.value),
@@ -170,7 +212,10 @@ class VaultRepository(private val dao: VaultDao, val files: FileStore) {
     }
 
     suspend fun deleteMember(id: String) = withContext(Dispatchers.IO) {
-        if (dao.memberNow(id)?.shared == true) return@withContext // the Common vault can't be removed
+        val m = dao.memberNow(id) ?: return@withContext
+        if (m.shared) return@withContext // the Common vault can't be removed
+        // Another member (an admin removing them from the group): everyone's phone drops them.
+        if (m.origin != null) { admin()?.removeMember(m.groupId ?: return@withContext, m.origin) ?: error("Only a group admin can remove members"); return@withContext }
         dao.documentsNow(id).forEach { it.attachments.forEach { a -> files.delete(a.id) }; files.delete(it.pictureFile) }
         dao.memberNow(id)?.let { files.delete(it.photoFile) }
         dao.deleteMember(id)
@@ -178,7 +223,16 @@ class VaultRepository(private val dao: VaultDao, val files: FileStore) {
     }
 
     suspend fun saveDocument(doc: DocumentEntity, fields: List<DocField>) = withContext(Dispatchers.IO) {
-        dao.upsertDocument(doc.copy(fieldsJson = encodeFields(fields), updatedAt = System.currentTimeMillis()))
+        var row = doc.copy(fieldsJson = encodeFields(fields), updatedAt = System.currentTimeMillis())
+        val member = dao.memberNow(doc.memberId)
+        val target = doc.origin ?: member?.origin
+        // Another member's document (theirs, or one they put in Common): an admin's change, which their phone takes over.
+        if (target != null && member != null && doc.eventId == null) {
+            val prefix = "s:${member.groupId}:$target:"
+            row = row.copy(id = if (row.id.startsWith(prefix)) row.id else prefix + row.id, origin = target)
+            admin()?.putDoc(row, member) ?: error("Only a group admin can change this")
+        }
+        dao.upsertDocument(row)
         onChanged()
     }
 
@@ -189,6 +243,7 @@ class VaultRepository(private val dao: VaultDao, val files: FileStore) {
     }
 
     suspend fun deleteDocument(id: String) = withContext(Dispatchers.IO) {
+        dao.documentNow(id)?.let { d -> if (d.origin != null) admin()?.deleteDoc(d, dao.memberNow(d.memberId)) ?: error("Only a group admin can remove this") }
         dao.documentNow(id)?.let { it.attachments.forEach { a -> files.delete(a.id) }; files.delete(it.pictureFile) }
         dao.deleteDocument(id)
         onChanged()

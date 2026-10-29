@@ -37,8 +37,16 @@ data class GroupEntity(
     /** Group picture: a template ("family", "friends", "office", "flat"); [photoFile] (your own photo) wins when set. */
     val pic: String? = null,
     val photoFile: String? = null,
+    /** Key of the member who made the group: always an admin. Null until known (older groups learn it on the next sync). Database version 9. */
+    val creator: String? = null,
+    /** Other admins' keys, comma separated, and when that list was last changed (the newest list from an admin wins). */
+    val admins: String? = null,
+    val adminsAt: Long = 0L,
 ) {
     val peerList: List<Peer> get() = Peer.decode(peers)
+    val adminKeys: Set<String> get() = setOfNotNull(creator) + admins.orEmpty().split(',').filter { it.isNotBlank() }
+    /** Admins can change other members' documents and profiles, make admins and remove people. A group of one is yours. */
+    fun isAdmin(key: String?): Boolean = key != null && (key in adminKeys || (creator == null && peerList.isEmpty()))
 }
 
 /** Another account in a group: their app shares an encrypted index file (Drive "anyone with the link", sealed with the group code). */

@@ -279,6 +279,8 @@ private fun mrzLines(holder: String, cc: String, masked: String): Pair<String, S
 fun FdWalletCard(
     doc: DocumentEntity, holderFallback: String, open: Boolean, modifier: Modifier = Modifier,
     photoFile: String? = null, character: String? = null, shared: Boolean = false,
+    /** Cast a shadow up onto the card behind it (every card in a stack but the first). */
+    shadeAbove: Boolean = false,
 ) {
     val c = Fd.c
     val t = DocTypes.forName(doc.name)
@@ -290,7 +292,7 @@ fun FdWalletCard(
     val paper = tpl == CardTpl.PAPER
     val ink = if (paper) c.mix(hue, .45f, c.fg) else Color.White
     val sheet = c.mix(hue, .10f, c.surface)
-    val shadow by animateDpAsState(if (open) 18.dp else 12.dp, tween(350, easing = FdEase), label = "cardShadow")
+    val shadow by animateDpAsState(if (open) 22.dp else 14.dp, tween(350, easing = FdEase), label = "cardShadow")
     // The lifted (selected) card gets a soft light rim.
     val rim by animateFloatAsState(if (open) 1f else 0f, tween(300, easing = FdEase), label = "cardRim")
     val shape = RoundedCornerShape(18.dp)
@@ -298,7 +300,17 @@ fun FdWalletCard(
     val holder = doc.holder(holderFallback)
 
     BoxWithConstraints(
-        modifier.fillMaxWidth().shadow(shadow, shape, ambientColor = Color(0x80000000), spotColor = Color(0xA6000000)).clip(shape)
+        modifier.fillMaxWidth()
+            // Elevation shadows fall downwards, where the next card covers them; so each card also darkens the strip
+            // of the card behind it, just above its own top edge. Drawn by hand: it looks the same on every phone.
+            .then(if (shadeAbove) Modifier.drawBehind {
+                val h = 26.dp.toPx(); val inset = 4.dp.toPx(); val r = 18.dp.toPx()
+                drawRoundRect(Brush.verticalGradient(0f to Color.Transparent, .55f to Color.Black.copy(alpha = if (c.dark) .32f else .16f),
+                    1f to Color.Black.copy(alpha = if (c.dark) .62f else .38f), startY = -h, endY = r * .6f),
+                    topLeft = Offset(inset, -h), size = androidx.compose.ui.geometry.Size(size.width - inset * 2, h + r),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(r, r))
+            } else Modifier)
+            .shadow(shadow, shape, ambientColor = Color(0xB3000000), spotColor = Color(0xCC000000)).clip(shape)
             .border(2.dp, (if (paper) hue else Color.White).copy(alpha = (if (paper) .7f else .75f) * rim), shape)
             .then(if (paper) Modifier.background(sheet).border(1.dp, hue.copy(alpha = .22f), shape)
             else Modifier.background(Brush.linearGradient(listOf(hue, deep), Offset.Zero, Offset(900f, 1100f)))),
@@ -607,7 +619,7 @@ fun FdWalletStack(
                                     }
                                 }
                             },
-                        photoFile = owner?.photoFile, character = owner?.avatar, shared = owner?.shared == true,
+                        photoFile = owner?.photoFile, character = owner?.avatar, shared = owner?.shared == true, shadeAbove = i > 0 || dragging,
                     )
                 }
             }

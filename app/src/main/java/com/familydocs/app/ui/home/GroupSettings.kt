@@ -98,6 +98,11 @@ fun GroupSettingsSheet(groupId: String, intro: String? = null, joinedFrom: Strin
     val g = group ?: return
     var busy by remember { mutableStateOf<String?>(null) }
     var forgetting by remember { mutableStateOf<String?>(null) }
+    // admins: change someone's role, or remove them from the group
+    val self by app.repo.self().collectAsStateWithLifecycle(null)
+    val iAdmin = g.isAdmin(self?.id)
+    var managing by remember { mutableStateOf<String?>(null) }
+    var removing by remember { mutableStateOf<String?>(null) }
     var croppingFor by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
     val sendInvite = rememberInviteSender { busy = if (it) "Preparing the invite…" else null }
     // Requests to join with the code (when the app was built with the request server)
@@ -197,6 +202,14 @@ fun GroupSettingsSheet(groupId: String, intro: String? = null, joinedFrom: Strin
             // ---- sharing ----
             Label("Shared with")
             val peers = g.peerList
+            if (peers.isNotEmpty()) {
+                val adminNames = g.adminKeys.mapNotNull { k -> if (k == self?.id) "you" else peers.firstOrNull { it.key == k }?.name }
+                Text(when {
+                    iAdmin -> "You're an admin: you can change anyone's documents and profile, make others admins and remove people. They see a note when you do."
+                    adminNames.isEmpty() -> "Everyone keeps their own documents and profile up to date. Admins (whoever made the group, and anyone they choose) can change anyone's."
+                    else -> "Everyone keeps their own documents and profile up to date. Admins (${adminNames.joinToString(", ")}) can change anyone's."
+                }, style = fdText(12.5f, color = c.muted), modifier = Modifier.padding(bottom = 10.dp))
+            }
             if (peers.isEmpty()) Text("No one yet. Invite the others, or share the code: they can ask to join and you approve. Their documents come back automatically.",
                 style = fdText(13f, color = c.muted), modifier = Modifier.padding(bottom = 10.dp))
             else Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).border(1.dp, c.line, RoundedCornerShape(16.dp)).padding(vertical = 2.dp)) {
@@ -204,10 +217,18 @@ fun GroupSettingsSheet(groupId: String, intro: String? = null, joinedFrom: Strin
                     Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text(p.name.ifBlank { "Group member" }, style = fdText(14.5f, FontWeight.Medium))
+                            when {
+                                p.key == g.creator -> "Admin · made the group"
+                                p.key in g.adminKeys -> "Admin"
+                                else -> null
+                            }?.let { Text(it, style = fdText(12f, FontWeight.SemiBold, c.accent)) }
                             Text(if (p.at == 0L) "Not read yet" else "Updated " + android.text.format.DateUtils.getRelativeTimeSpanString(p.at), style = fdText(12f, color = c.muted))
                             p.err?.let { Text("Last sync: $it", style = fdText(11.5f, color = c.danger), maxLines = 2) }
                         }
-                        FdIconButton("close", { forgetting = p.key }, size = 36.dp, iconSize = 16.dp, tint = c.muted, description = "Stop reading ${p.name}'s share")
+                        when {
+                            iAdmin && p.key != g.creator -> FdIconButton("sliders", { managing = p.key }, size = 36.dp, iconSize = 17.dp, tint = c.muted, description = "Manage ${p.name}")
+                            !iAdmin -> FdIconButton("close", { forgetting = p.key }, size = 36.dp, iconSize = 16.dp, tint = c.muted, description = "Stop reading ${p.name}'s share")
+                        }
                     }
                 }
             }
@@ -226,6 +247,32 @@ fun GroupSettingsSheet(groupId: String, intro: String? = null, joinedFrom: Strin
         }
     }
     croppingFor?.let { bmp -> GroupPhotoCropSheet(bmp, onDone = { bytes, _ -> scope.launch { app.repo.setGroupPicture(g.id, null, bytes) }; croppingFor = null }, onDismiss = { croppingFor = null }) }
+    managing?.let { key ->
+        val name = g.peerList.firstOrNull { it.key == key }?.name ?: "Member"
+        val isAdmin = key in g.adminKeys
+        FdSheet({ managing = null }) {
+            com.familydocs.app.ui.ds.SheetTitle(name, if (isAdmin) "Admin of ${g.name}: can change anyone's documents and profiles." else "Member of ${g.name}: changes only their own things.")
+            FdButton(if (isAdmin) "Remove admin role" else "Make admin", {
+                scope.launch {
+                    runCatching { app.share.setAdmin(g.id, key, !isAdmin) }
+                        .onSuccess { toast.show(if (isAdmin) "$name is no longer an admin" else "$name is now an admin") }.onFailure { toast.show(it.message ?: "Couldn't change it") }
+                    managing = null
+                }
+            }, kind = BtnKind.Ghost, icon = "shield")
+            Spacer(Modifier.height(10.dp))
+            FdButton("Remove from group", { removing = key; managing = null }, kind = BtnKind.Ghost, icon = "trash", contentColor = c.danger)
+        }
+    }
+    removing?.let { key ->
+        val name = g.peerList.firstOrNull { it.key == key }?.name ?: "them"
+        com.familydocs.app.ui.ds.FdConfirmSheet("Remove $name from ${g.name}?",
+            "$name's documents disappear from everyone's phone and they no longer see ${g.name}'s things; their phone tells them you removed them. " +
+                "Nothing is deleted from their own phone or Drive, and they can ask to join again with the code.",
+            "Remove", onConfirm = { scope.launch {
+                runCatching { app.share.removeMember(g.id, key) }.onSuccess { toast.show("$name was removed from ${g.name}") }.onFailure { toast.show(it.message ?: "Couldn't remove") }
+                removing = null
+            } }, onDismiss = { removing = null })
+    }
     forgetting?.let { key ->
         val name = g.peerList.firstOrNull { it.key == key }?.name ?: "them"
         com.familydocs.app.ui.ds.FdConfirmSheet("Stop reading $name's share?", "What $name shared is removed from this phone. Nothing in their Drive changes; you can add their invite again later.",

@@ -157,7 +157,9 @@ class JoinRequests(private val context: Context, private val dao: VaultDao, priv
                     back != null -> runCatching {
                         val inv = GroupInvite.find(RequestCrypto.openText(back, share.groupKey(g))) ?: return@runCatching
                         val now = dao.groupNow(g.id) ?: return@runCatching
-                        if (inv.groupId == g.id && now.peerList.none { it.key == inv.from }) share.accept(null, inv)
+                        // (someone an admin removed after this request isn't brought back by it)
+                        val at = d.optJSONObject("fields")?.optJSONObject("at")?.optString("integerValue")?.toLongOrNull() ?: 0L
+                        if (inv.groupId == g.id && now.peerList.none { it.key == inv.from } && !share.removedSince(g.id, inv.from, at)) share.accept(null, inv)
                     }
                     d.str("ok") == null && d.str("no") == null -> {
                         val name = d.str("who")?.let { runCatching { RequestCrypto.openText(it, RequestCrypto.codeKey(c)) }.getOrNull() } ?: "Someone"

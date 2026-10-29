@@ -88,10 +88,10 @@ fun FamilyScreen(onMember: (String) -> Unit, onSettings: () -> Unit, onDocument:
     val c = Fd.c
     val groups by app.repo.groups.collectAsStateWithLifecycle(emptyList())
     val gid by app.repo.groupId.collectAsStateWithLifecycle()
-    // People are the group's members with their own accounts (and Common). Once: remove the people this phone made up
-    // earlier that have nothing in them (the old preset family); anyone with documents stays.
+    // People are the group's members with their own accounts (and Common). Once: the people this phone made up earlier
+    // (the old preset family) go; any documents they had move to Common.
     LaunchedEffect(Unit) {
-        if (!app.settings.value.peopleCleanupDone) { app.repo.removeEmptyLocalPeople(); app.settings.update { it.copy(peopleCleanupDone = true, familyPresetDone = true) } }
+        if (!app.settings.value.peopleCleanupDone) { app.repo.foldLocalPeople(); app.settings.update { it.copy(peopleCleanupDone = true, familyPresetDone = true) } }
     }
     // Whenever Home comes back to the screen: new members / requests, then publish and read the group's shares.
     val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
@@ -127,6 +127,13 @@ fun FamilyScreen(onMember: (String) -> Unit, onSettings: () -> Unit, onDocument:
             FdBanner("people", if (reqs.size == 1) "${reqs[0].name} asked to join" else "${reqs.size} people asked to join",
                 Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 6.dp)) {
                 com.familydocs.app.ui.ds.FdTextButton("Review", { gid?.let { settingsFor = Triple(it, null, null) } })
+            }
+        }
+        // What a group admin changed in your things (or about you): stays until you close it.
+        val notes by app.share.notices.collectAsStateWithLifecycle()
+        notes.takeLast(3).reversed().forEach { n ->
+            FdBanner("shield", n.text, Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 6.dp)) {
+                FdIconButton("close", { app.share.dismissNotice(n.id) }, size = 32.dp, iconSize = 15.dp, description = "Dismiss")
             }
         }
         // Switching groups: the old page fades back a touch, the new one rises in and settles.
@@ -288,7 +295,7 @@ private fun GroupHeader(groups: List<com.familydocs.app.data.GroupEntity>, gid: 
     val current = groups.firstOrNull { it.id == gid }
     val ring by androidx.compose.animation.animateColorAsState(if (open) c.accent else c.accent.copy(alpha = .55f), tween(200), label = "groupRing")
     Column {
-        Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically,
+        Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             // The name shrinks to whatever room the four buttons leave (narrow phones, large font settings), never cut off.
             androidx.compose.foundation.layout.BoxWithConstraints(Modifier.weight(1f)) {

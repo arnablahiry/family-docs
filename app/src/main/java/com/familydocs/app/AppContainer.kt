@@ -25,6 +25,7 @@ class AppContainer(context: Context) {
         // Any change to the vault: back up to Drive / update shared groups a couple of minutes later.
         VaultRepository(db.dao(), files).also { r ->
             r.onChanged = { BackupWorker.soon(app) } // (it checks whether backup or group sharing is on)
+            r.admin = { share } // a group admin's changes to other members' things
             r.groupId.value = settings.value.currentGroup
         }
     }
