@@ -64,6 +64,7 @@ import com.familydocs.app.domain.DocTypes
 import com.familydocs.app.security.BiometricHelper
 import com.familydocs.app.security.SettingsStore
 import com.familydocs.app.ui.components.LocalContainer
+import kotlinx.coroutines.flow.first
 import com.familydocs.app.ui.ds.BtnKind
 import com.familydocs.app.ui.ds.Fd
 import com.familydocs.app.ui.ds.FdAvatar
@@ -97,7 +98,8 @@ private enum class DriveAction { Enable, Backup, Restore, SignOut, Delete }
 
 /** Demo `settings`: profile card, Group, Security, Backup, About (your countries are under Your account), all as `.list` groups with `.lic` tiles and `.sw` switches. */
 @Composable
-fun SettingsScreen(onBack: () -> Unit, onEditAccount: () -> Unit, onChangePasscode: () -> Unit, onMember: (String) -> Unit = {}, onAddMember: () -> Unit = {}) {
+fun SettingsScreen(onBack: () -> Unit, onEditAccount: () -> Unit, onChangePasscode: () -> Unit, onMember: (String) -> Unit = {}, onAddMember: () -> Unit = {},
+                   scrollTo: String? = null) {
     val app = LocalContainer.current
     val c = Fd.c
     val context = LocalContext.current
@@ -164,7 +166,16 @@ fun SettingsScreen(onBack: () -> Unit, onEditAccount: () -> Unit, onChangePassco
 
     Column(Modifier.fillMaxSize().background(c.bg).statusBarsPadding()) {
         FdTopBar("Settings", onBack)
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).navigationBarsPadding()) {
+        // Opened from the update box on Home: straight down to About, where the update is.
+        val scroll = rememberScrollState()
+        androidx.compose.runtime.LaunchedEffect(scrollTo) {
+            if (scrollTo == "updates") {
+                androidx.compose.runtime.snapshotFlow { scroll.maxValue }.first { it in 1 until Int.MAX_VALUE }
+                kotlinx.coroutines.delay(120)
+                scroll.animateScrollTo(scroll.maxValue, tween(650, easing = com.familydocs.app.ui.ds.FdEase))
+            }
+        }
+        Column(Modifier.weight(1f).verticalScroll(scroll).navigationBarsPadding()) {
             // `.prof`
             account?.let { a ->
                 Row(
@@ -368,6 +379,8 @@ private fun DriveTree(repo: VaultRepository, viewable: Boolean) {
 @Composable
 private fun UpdateRow(updater: com.familydocs.app.update.AppUpdater, beforeLeavingApp: () -> Unit) {
     val scope = rememberCoroutineScope()
+    // the download outlives this screen: go back Home and its box shows the progress
+    val appScope = LocalContainer.current.appScope
     val u by updater.state.collectAsStateWithLifecycle()
     androidx.compose.runtime.LaunchedEffect(Unit) { if (u !is com.familydocs.app.update.AppUpdater.State.Downloading) updater.check() }
     when (val st = u) {
@@ -376,10 +389,10 @@ private fun UpdateRow(updater: com.familydocs.app.update.AppUpdater, beforeLeavi
             FdListItem("Update to ${st.release.version}",
                 if (updater.canInstall()) "Download$mb and install · everything on this phone stays"
                 else "First allow Lararium to install apps (one switch), then tap again",
-                icon = "cloud", onClick = { beforeLeavingApp(); scope.launch { updater.downloadAndInstall(st.release) } })
+                icon = "cloud", onClick = { beforeLeavingApp(); appScope.launch { updater.downloadAndInstall(st.release) } })
         }
         is com.familydocs.app.update.AppUpdater.State.Downloading ->
-            FdListItem("Downloading ${st.release.version}…", "${(st.progress * 100).toInt()}% · the installer opens when it's done", icon = "cloud")
+            FdListItem("Downloading ${st.release.version}…", "${(st.progress * 100).toInt()}% · you can go back, it keeps going; the installer opens when it's done", icon = "cloud")
         com.familydocs.app.update.AppUpdater.State.Checking -> FdListItem("Checking for updates…", null, icon = "refresh")
         com.familydocs.app.update.AppUpdater.State.UpToDate -> FdListItem("Up to date", "You have the latest version", icon = "check",
             onClick = { scope.launch { updater.check() } }, chevron = false)

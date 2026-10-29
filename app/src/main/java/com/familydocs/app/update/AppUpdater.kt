@@ -50,7 +50,10 @@ class AppUpdater(private val context: Context) {
         }
     }
 
-    /** Downloads the APK (progress in [state]) and opens the installer; asks for the install permission first if needed. */
+    /**
+     * Downloads the APK (progress in [state]) and opens the installer; asks for the install permission first if needed.
+     * Run it in a scope that outlives the screen (AppContainer.appScope), so leaving Settings doesn't stop it.
+     */
     suspend fun downloadAndInstall(r: Release) {
         if (!canInstall()) { askInstallPermission(); return }
         _state.value = State.Downloading(r, 0f)
@@ -62,10 +65,12 @@ class AppUpdater(private val context: Context) {
                 val total = c.contentLengthLong.takeIf { it > 0 } ?: r.bytes
                 c.inputStream.use { input ->
                     out.outputStream().use { o ->
-                        val buf = ByteArray(64 * 1024); var done = 0L; var n: Int
+                        val buf = ByteArray(64 * 1024); var done = 0L; var n: Int; var pct = 0
                         while (input.read(buf).also { n = it } >= 0) {
                             o.write(buf, 0, n); done += n
-                            if (total > 0) _state.value = State.Downloading(r, (done.toFloat() / total).coerceIn(0f, 1f))
+                            // one update per whole percent (the screens redraw for each)
+                            val now = if (total > 0) (done * 100 / total).toInt().coerceIn(0, 100) else 0
+                            if (now != pct) { pct = now; _state.value = State.Downloading(r, now / 100f) }
                         }
                     }
                 }

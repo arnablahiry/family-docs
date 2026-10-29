@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -83,7 +84,8 @@ import kotlinx.coroutines.launch
 import java.util.Calendar
 
 @Composable
-fun FamilyScreen(onMember: (String) -> Unit, onSettings: () -> Unit, onDocument: (String) -> Unit, onEvent: (String) -> Unit, onNewEvent: () -> Unit) {
+fun FamilyScreen(onMember: (String) -> Unit, onSettings: () -> Unit, onDocument: (String) -> Unit, onEvent: (String) -> Unit, onNewEvent: () -> Unit,
+                 onUpdates: () -> Unit = onSettings) {
     val app = LocalContainer.current
     val c = Fd.c
     val groups by app.repo.groups.collectAsStateWithLifecycle(emptyList())
@@ -140,7 +142,7 @@ fun FamilyScreen(onMember: (String) -> Unit, onSettings: () -> Unit, onDocument:
         AnimatedContent(gid, transitionSpec = {
             (fadeIn(tween(280, delayMillis = 90)) + slideInVertically(tween(380, easing = FdEase)) { it / 16 } + scaleIn(tween(380, easing = FdEase), initialScale = .97f)) togetherWith
                 (fadeOut(tween(150)) + scaleOut(tween(200), targetScale = .985f))
-        }, label = "groupSwitch") { g -> GroupHome(g, onMember, onSettings, onDocument, onEvent, onNewEvent) }
+        }, label = "groupSwitch") { g -> GroupHome(g, onMember, onSettings, onDocument, onEvent, onNewEvent, onUpdates) }
     }
     when (sheet) {
         "create" -> NewGroupSheet(onCreated = { g -> app.selectGroup(g.id); app.settings.update { it.copy(groupIntroDone = true) }; settingsFor = Triple(g.id, "created", null) },
@@ -155,7 +157,8 @@ fun FamilyScreen(onMember: (String) -> Unit, onSettings: () -> Unit, onDocument:
 
 /** One group's home: its people, search and events (keyed by group, so the switch animation shows the right page). */
 @Composable
-private fun GroupHome(g: String?, onMember: (String) -> Unit, onSettings: () -> Unit, onDocument: (String) -> Unit, onEvent: (String) -> Unit, onNewEvent: () -> Unit) {
+private fun GroupHome(g: String?, onMember: (String) -> Unit, onSettings: () -> Unit, onDocument: (String) -> Unit, onEvent: (String) -> Unit, onNewEvent: () -> Unit,
+                      onUpdates: () -> Unit) {
     val app = LocalContainer.current
     val c = Fd.c
     val account by app.repo.account.collectAsStateWithLifecycle(null)
@@ -176,12 +179,33 @@ private fun GroupHome(g: String?, onMember: (String) -> Unit, onSettings: () -> 
             Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp)) {
                 Text("${greeting()}, ${account?.name?.substringBefore(' ').orEmpty()}", style = fdText(14f, color = c.muted))
                 FdInput(query, { query = it }, Modifier.padding(top = 14.dp), placeholder = "Search documents, numbers…", icon = "search")
-                // A newer version on GitHub: a quiet hint; Settings › About downloads and installs it.
+                // A newer version on GitHub: a quiet hint that opens Settings at the update; while it downloads (it keeps
+                // going if you come back here), the same box shows the progress.
                 val update by app.updater.state.collectAsStateWithLifecycle()
-                (update as? com.familydocs.app.update.AppUpdater.State.Available)?.let { a ->
-                    FdBanner("cloud", "Lararium ${a.release.version} is available", Modifier.padding(top = 12.dp).clickable(onClick = onSettings)) {
-                        Text("Update", style = fdText(12.5f, FontWeight.SemiBold, c.primary))
+                when (val u = update) {
+                    is com.familydocs.app.update.AppUpdater.State.Available ->
+                        FdBanner("cloud", "Lararium ${u.release.version} is available", Modifier.padding(top = 12.dp).clickable(onClick = onUpdates)) {
+                            Text("Update", style = fdText(12.5f, FontWeight.SemiBold, c.primary))
+                        }
+                    is com.familydocs.app.update.AppUpdater.State.Downloading -> {
+                        val shown by androidx.compose.animation.core.animateFloatAsState(u.progress, tween(300), label = "updateProgress")
+                        Column(Modifier.padding(top = 12.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.accentSoft).clickable(onClick = onUpdates)
+                            .padding(horizontal = 12.dp, vertical = 10.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                FdIcon("download", 18.dp)
+                                Text("Downloading Lararium ${u.release.version}…", style = fdText(12.5f), modifier = Modifier.weight(1f))
+                                Text("${(u.progress * 100).toInt()}%", style = fdText(12.5f, FontWeight.SemiBold))
+                            }
+                            Box(Modifier.padding(top = 8.dp).fillMaxWidth().height(5.dp).clip(RoundedCornerShape(3.dp)).background(c.surface)) {
+                                Box(Modifier.fillMaxWidth(shown.coerceIn(0f, 1f)).fillMaxHeight().clip(RoundedCornerShape(3.dp)).background(c.accent))
+                            }
+                        }
                     }
+                    is com.familydocs.app.update.AppUpdater.State.Failed ->
+                        FdBanner("info", "The update didn't finish", Modifier.padding(top = 12.dp).clickable(onClick = onUpdates)) {
+                            Text("Retry", style = fdText(12.5f, FontWeight.SemiBold, c.primary))
+                        }
+                    else -> {}
                 }
             }
         }

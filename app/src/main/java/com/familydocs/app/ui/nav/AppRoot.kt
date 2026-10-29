@@ -99,6 +99,7 @@ private fun VaultNav() {
             FamilyScreen(
                 onMember = { nav.navigate("member/$it") },
                 onSettings = { nav.navigate("settings") },
+                onUpdates = { nav.navigate("settings?to=updates") },
                 onDocument = { nav.navigate("doc/$it") },
                 onEvent = { nav.navigate("event/$it") },
                 onNewEvent = { nav.navigate("event-edit") },
@@ -142,8 +143,8 @@ private fun VaultNav() {
             })
         }
         composable("passwords/{id}", idArg) { e -> PasswordsScreen(e.arguments!!.getString("id")!!, onBack = { nav.popBackStack() }) }
-        composable("settings") {
-            SettingsScreen(onBack = { nav.popBackStack() }, onEditAccount = { nav.navigate("account") }, onChangePasscode = { nav.navigate("passcode") },
+        composable("settings?to={to}", listOf(navArgument("to") { type = NavType.StringType; nullable = true; defaultValue = null })) { e ->
+            SettingsScreen(scrollTo = e.arguments?.getString("to"), onBack = { nav.popBackStack() }, onEditAccount = { nav.navigate("account") }, onChangePasscode = { nav.navigate("passcode") },
                 onMember = { nav.navigate("member/$it") }, onAddMember = { nav.navigate("member-edit") })
         }
         composable("account") {
