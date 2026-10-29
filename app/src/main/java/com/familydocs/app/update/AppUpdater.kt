@@ -103,7 +103,7 @@ class AppUpdater(private val context: Context) {
     }
 
     companion object {
-        const val REPO = "arnablahiry/family-docs"
+        const val REPO = "arnablahiry/lararium"
         private val VERSION = Regex("\\d+\\.\\d+\\.\\d+")
 
         /** "0.5.10" > "0.5.9" */
