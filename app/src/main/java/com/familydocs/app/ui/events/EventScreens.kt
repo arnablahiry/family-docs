@@ -234,7 +234,8 @@ fun EventScreen(eventId: String, onBack: () -> Unit, onEdit: () -> Unit, onDocum
                 kotlinx.coroutines.delay(600)
                 app.repo.saveEvent(e.copy(notes = note))
             }
-            FdInput(note, { note = it }, Modifier.padding(horizontal = 20.dp), placeholder = "Hotel, train times, what to carry… (saved as you type)", singleLine = false)
+            // *bold*, _italic_, ~strike~, ```mono``` like WhatsApp: styled as you type, clean when you're done
+            com.familydocs.app.ui.ds.FdNotesField(note, { note = it }, Modifier.padding(horizontal = 20.dp), placeholder = "Hotel, train times, what to carry… (saved as you type)")
             FdButton("Delete event", { confirmDelete = true }, Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 30.dp), BtnKind.Ghost, icon = "trash", contentColor = c.danger)
         }
     }
@@ -438,7 +439,7 @@ fun EditEventScreen(eventId: String?, onBack: () -> Unit, onSaved: (id: String, 
                     }
                 }
             }
-            FdField("Notes") { FdInput(notes, { notes = it }, placeholder = "Hotel, train times, what to carry…", singleLine = false) }
+            FdField("Notes") { com.familydocs.app.ui.ds.FdNotesField(notes, { notes = it }, placeholder = "Hotel, train times, what to carry…") }
             Spacer(Modifier.height(8.dp))
         }
         FdSavebar { FdButton("Save event", ::save, icon = "check") }
