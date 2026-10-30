@@ -180,7 +180,7 @@ fun DocumentScreen(docId: String, onBack: () -> Unit, onEdit: (memberId: String)
                     if (i > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(c.line))
                     Row(Modifier.padding(start = 14.dp, end = 6.dp, top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         Column(Modifier.weight(1f)) {
-                            Text(f.label + if (f.verified == true) " ✓" else "", style = fdText(11f, color = c.muted))
+                            Text(f.label, style = fdText(11f, color = c.muted))
                             // Shown in full: the app itself is behind the passcode / fingerprint.
                             Text(f.value, style = fdText(14.5f, FontWeight.SemiBold, c.fg))
                         }

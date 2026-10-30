@@ -275,6 +275,9 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
         }
 
         val keepDocs = mutableSetOf<String>()
+        // What they changed since the last read, for a silent notification (not on the first read: that's everything).
+        val activity = mutableListOf<String>()
+        fun where(member: String) = if (member == common?.id) " in Common" else ""
         j.getJSONArray("documents").forEachObj { d ->
             val member = memberIds[d.getString("member")] ?: return@forEachObj
             val id = prefix + d.getString("id")
@@ -285,6 +288,7 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
             val atts = mutableListOf<Attachment>()
             d.getJSONArray("files").forEachObj { f -> fetch(f.getString("f"))?.let { atts += Attachment(it, f.optString("mime", "image/jpeg")) } }
             if (existing != null && existing.updatedAt == d.getLong("updated") && existing.attachments.map { it.id } == atts.map { it.id }) return@forEachObj
+            activity += (if (existing == null) "added " else "updated ") + d.getString("name") + where(member)
             dao.upsertDocument(DocumentEntity(
                 id = id, memberId = member, name = d.getString("name"), fileId = atts.firstOrNull()?.id, fileMime = atts.firstOrNull()?.mime,
                 display = runCatching { DisplayMode.valueOf(d.getString("display")) }.getOrDefault(DisplayMode.ICON),
@@ -297,6 +301,7 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
         }
 
         val keepPws = mutableSetOf<String>()
+        val hadPws = if (common != null) dao.receivedPasswords(p.key, "$prefix%").map { it.id }.toSet() else emptySet()
         if (common != null) {
             suspend fun take(w: JSONObject) {
                 val id = prefix + w.getString("id"); keepPws += id
@@ -310,6 +315,11 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
                 else opened.forEachObj { take(it) }
             }
         }
+        dao.allDocumentsNow().filter { it.id.startsWith(prefix) && it.id !in keepDocs && it.id !in pendingDocs && it.id !in pendingDel && it.eventId == null }
+            .forEach { activity += "removed ${it.name}" + where(it.memberId) }
+        (keepPws - hadPws).size.takeIf { it > 0 && common != null }?.let { n -> activity += if (n == 1) "added a login in Common" else "added $n logins in Common" }
+        if (p.at > 0L && activity.isNotEmpty())
+            runCatching { GroupActivity.show(context, g.id, g.name, from.optString("name", p.name), activity.take(6) + listOfNotNull(if (activity.size > 6) "and ${activity.size - 6} more" else null)) }
         removeFrom(g, p.key, keepDocs + pendingDocs, keepMembers, keepPws)
         cleanup(retired)
 

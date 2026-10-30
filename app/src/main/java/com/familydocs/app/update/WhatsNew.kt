@@ -26,11 +26,16 @@ class WhatsNew(context: Context) {
         }
         if (seen == current) return emptyList()
         val all = runCatching { Changelog.parse(context.assets.open("changelog.txt").bufferedReader().use { it.readText() }) }.getOrDefault(emptyList())
-        // unknown last version (updating to the first one with this note): just this version's changes
-        return Changelog.between(all, seen, current).let { if (seen == null) it.take(1) else it }
+        // Every version since the one you had, so skipped updates are covered too. Unknown (updating from a version
+        // before this note existed): everything since then.
+        return Changelog.between(all, seen ?: BEFORE_NOTES, current)
     }
 
     fun dismiss() { prefs.edit().putString(SEEN, current).apply(); _entries.value = emptyList() }
 
-    private companion object { const val SEEN = "seen" }
+    private companion object {
+        const val SEEN = "seen"
+        /** The last version without this note: anyone updating with nothing recorded came from it or older. */
+        const val BEFORE_NOTES = "0.8.3"
+    }
 }

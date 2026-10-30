@@ -221,8 +221,6 @@ fun AddDocumentScreen(memberId: String, docId: String?, onBack: () -> Unit, onSa
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     BasicTextField(f.label, { vm.updateField(i, f.copy(label = it)) }, singleLine = true, textStyle = fdText(11f, FontWeight.Medium, c.muted),
                                         cursorBrush = SolidColor(c.primary), modifier = Modifier.weight(1f, fill = false))
-                                    if (f.verified == true) Text(" ✓", style = fdText(11f, color = c.ok))
-                                    if (f.auto) Text(" · auto", style = fdText(11f, color = c.accent))
                                 }
                                 BasicTextField(f.value, { vm.updateField(i, f.copy(value = it)) }, singleLine = true, textStyle = fdText(14.5f, color = c.fg),
                                     cursorBrush = SolidColor(c.primary), modifier = Modifier.fillMaxWidth(),

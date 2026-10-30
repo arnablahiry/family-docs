@@ -20,6 +20,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -443,19 +444,25 @@ private fun GroupSheet(title: String, text: String, placeholder: String, action:
     }
 }
 
-/** "What's new in 0.8.4": the changes since the version you had, with ✕. */
+/**
+ * "What's new in 0.8.6": the changes since the version you had, with ✕. Skipped versions are included: the newest
+ * shows open, the earlier ones fold out under "Also new since you last updated".
+ */
 @Composable
 private fun WhatsNewBox(entries: List<com.familydocs.app.domain.Changelog.Entry>, modifier: Modifier = Modifier, onClose: () -> Unit) {
     val c = Fd.c
-    Column(modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.accentSoft).padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 12.dp)) {
+    var all by remember { mutableStateOf(false) }
+    Column(modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.accentSoft).animateContentSize(tween(300, easing = com.familydocs.app.ui.ds.FdEase))
+        .padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             FdIcon("sparkle", 18.dp)
             Text("What's new in ${entries.first().version}", style = fdText(13.5f, FontWeight.SemiBold), modifier = Modifier.weight(1f))
             FdIconButton("close", onClose, size = 32.dp, iconSize = 15.dp, description = "Close")
         }
         Column(Modifier.padding(start = 28.dp, end = 10.dp)) {
-            entries.forEach { e ->
-                if (entries.size > 1) Text(e.version, style = fdText(11.5f, FontWeight.SemiBold, c.muted), modifier = Modifier.padding(top = 6.dp))
+            val shown = if (all) entries else entries.take(1)
+            shown.forEach { e ->
+                if (shown.size > 1) Text(e.version, style = fdText(11.5f, FontWeight.SemiBold, c.muted), modifier = Modifier.padding(top = 6.dp))
                 e.notes.forEach { n ->
                     Row(Modifier.padding(top = 4.dp)) {
                         Text("•", style = fdText(12.5f, color = c.accent), modifier = Modifier.width(12.dp))
@@ -463,6 +470,8 @@ private fun WhatsNewBox(entries: List<com.familydocs.app.domain.Changelog.Entry>
                     }
                 }
             }
+            if (entries.size > 1) Text(if (all) "Show less" else "Also new since you last updated: ${entries.drop(1).joinToString(", ") { it.version }} ▾",
+                style = fdText(12f, FontWeight.SemiBold, c.primary), modifier = Modifier.padding(top = 8.dp).clickable { all = !all })
         }
     }
 }

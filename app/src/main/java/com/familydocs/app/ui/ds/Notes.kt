@@ -28,6 +28,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -130,6 +136,9 @@ object NoteFormat {
 @Composable
 fun FdNotesField(value: String, onValueChange: (String) -> Unit, modifier: Modifier = Modifier, placeholder: String = "") {
     val c = Fd.c
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    val zones = LocalNoteZones.current
+    val zoneKey = remember { Any() }
     var tv by remember { mutableStateOf(TextFieldValue(value, TextRange(value.length))) }
     LaunchedEffect(value) { if (value != tv.text) tv = TextFieldValue(value, TextRange(value.length)) }
     val source = remember { MutableInteractionSource() }
@@ -140,7 +149,22 @@ fun FdNotesField(value: String, onValueChange: (String) -> Unit, modifier: Modif
         if (focused) VisualTransformation { t -> TransformedText(NoteFormat.editing(t.text, mark), OffsetMapping.Identity) }
         else VisualTransformation { t -> NoteFormat.reading(t.text) }
     }
-    fun update(n: TextFieldValue) { tv = n; if (n.text != value) onValueChange(n.text) }
+    // Typing ends (formatting shows, keys hide) with Back, closing the keyboard, or a tap anywhere else; Back then
+    // doesn't also leave the page.
+    androidx.activity.compose.BackHandler(enabled = focused) { focusManager.clearFocus() }
+    @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+    val ime = androidx.compose.foundation.layout.WindowInsets.isImeVisible
+    var hadKeyboard by remember { mutableStateOf(false) }
+    LaunchedEffect(focused, ime) {
+        when {
+            !focused -> hadKeyboard = false
+            ime -> hadKeyboard = true
+            hadKeyboard -> { hadKeyboard = false; focusManager.clearFocus() }
+        }
+    }
+    androidx.compose.runtime.DisposableEffect(zones) { onDispose { zones?.rects?.remove(zoneKey) } }
+    LaunchedEffect(focused) { if (!focused) zones?.rects?.remove(zoneKey) }
+        fun update(n: TextFieldValue) { tv = n; if (n.text != value) onValueChange(n.text) }
     fun wrap(m: String) {
         val a = tv.selection.min; val b = tv.selection.max
         val t = tv.text
@@ -153,7 +177,7 @@ fun FdNotesField(value: String, onValueChange: (String) -> Unit, modifier: Modif
         if (t.startsWith("• ", start)) update(TextFieldValue(t.removeRange(start, start + 2), TextRange((at - 2).coerceAtLeast(start))))
         else update(TextFieldValue(t.substring(0, start) + "• " + t.substring(start), TextRange(at + 2)))
     }
-    Column(modifier.fillMaxWidth()) {
+    Column(modifier.fillMaxWidth().onGloballyPositioned { if (focused) zones?.rects?.set(zoneKey, it.boundsInRoot()) else zones?.rects?.remove(zoneKey) }) {
         BasicTextField(
             value = tv, onValueChange = ::update, interactionSource = source, minLines = 3,
             textStyle = fdText(15f, color = c.fg), cursorBrush = SolidColor(c.primary), visualTransformation = transform,
@@ -189,3 +213,34 @@ private fun FormatKey(label: String, style: SpanStyle, description: String, onCl
     }
 }
 
+/** Where focused notes fields are on screen (with their format keys), for [FdEndTypingOnTapOutside]. */
+class NoteZones { val rects = androidx.compose.runtime.mutableStateMapOf<Any, androidx.compose.ui.geometry.Rect>() }
+val LocalNoteZones = androidx.compose.runtime.staticCompositionLocalOf<NoteZones?> { null }
+
+/**
+ * Around the whole app: while a notes field is being typed in, a tap anywhere outside it (and its format keys) ends
+ * typing. The tap still does whatever it does there (buttons work as usual); drags and scrolls don't count.
+ */
+@Composable
+fun FdEndTypingOnTapOutside(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    val zones = remember { NoteZones() }
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    var origin by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+    Box(modifier.onGloballyPositioned { origin = it.positionInRoot() }.pointerInput(Unit) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false, pass = androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+            if (zones.rects.isEmpty()) return@awaitEachGesture
+            var moved = false
+            while (true) {
+                val e = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                val ch = e.changes.firstOrNull { it.id == down.id } ?: break
+                if ((ch.position - down.position).getDistance() > viewConfiguration.touchSlop) moved = true
+                if (!ch.pressed) break
+            }
+            val at = down.position + origin
+            if (!moved && zones.rects.values.none { it.contains(at) }) focusManager.clearFocus()
+        }
+    }) {
+        androidx.compose.runtime.CompositionLocalProvider(LocalNoteZones provides zones) { content() }
+    }
+}

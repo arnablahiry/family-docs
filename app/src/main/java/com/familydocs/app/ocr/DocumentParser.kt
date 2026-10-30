@@ -29,18 +29,79 @@ object DocumentParser {
         val lines = text.lines().map { it.trim() }.filter { it.isNotEmpty() }
         val up = text.uppercase()
 
+        // The dates printed next to their labels (issue, expiry, birth), read once for every kind of document.
+        val labelled = labelledDates(lines)
         (findMrz(lines) ?: findMrzLoose(text))?.let { mrz ->
+            // The machine-readable lines have no issue date: it comes from the printed part ("Date of Issue 12/03/2019").
             val r = parseMrz(mrz, up)
-            // The machine-readable lines have no issue date: look for it in the printed part ("Date of Issue 12/03/2019").
-            val (re, kind) = lookup("Date of Issue")
-            val issued = find(lines, re, kind)?.let { listOf(f("Date of Issue", it)) }.orEmpty()
-            return r.copy(fields = (r.fields + issued).filter { it.value.isNotBlank() })
+            return withDates(r.copy(fields = r.fields.filter { it.value.isNotBlank() }), labelled, hint, "Date of Issue")
         }
-        parseAadhaar(text, lines, up)?.let { return it }
-        parsePan(lines, up)?.let { return it }
-        parseDrivingLicence(lines, up)?.let { return it }
-        parseVoter(lines, up)?.let { return it }
-        return parseGeneric(text, lines, up, hint)
+        parseAadhaar(text, lines, up)?.let { return withDates(it, labelled, hint) }
+        parsePan(lines, up)?.let { return withDates(it, labelled, hint) }
+        parseDrivingLicence(lines, up)?.let { return withDates(it, labelled, hint) }
+        parseVoter(lines, up)?.let { return withDates(it, labelled, hint) }
+        return withDates(parseGeneric(text, lines, up, hint, labelled), labelled, hint)
+    }
+
+    // ---------------- dates by their labels ----------------
+
+    /** Case-insensitive for every alphabet ("ΛΗΞΗ" as well as "λήξη"). */
+    private fun ci(p: String) = Regex("(?iu)$p")
+    private val DATE_LABELS = listOf(
+        "issued" to ci("date\\s*of\\s*issue|issue\\s*date|issued\\s*on|date\\s*issued|valid(?:ity)?\\s*from|\\bissued\\b(?!\\s*by)|ausstellungsdatum|date\\s*de\\s*d[ée]livrance|data\\s*di\\s*rilascio|fecha\\s*de\\s*expedici[oó]n|έκδοσ[ηή]ς|ημ(?:ερομηνία)?\\.?\\s*έκδ|εκδοθ"),
+        "expiry" to ci("valid(?:ity)?\\s*(?:until|till|thru|through|to|upto|up\\s*to)|expir\\w*|date\\s*of\\s*expiry|\\bexp\\b\\.?|g[üu]ltig\\s*bis|date\\s*d'?\\s*expiration|scadenza|caducidad|λήξ[ηεί]\\w*|ισχύ\\w*\\s*(?:έως|μέχρι)"),
+        "dob" to ci("date\\s*of\\s*birth|birth\\s*date|\\bd\\.?o\\.?b\\b\\.?|geburtsdatum|date\\s*de\\s*naissance|γέννησ[ηή]ς"),
+    )
+
+    /**
+     * Issue, expiry and birth dates by their labels. Handles the value on the same line ("Issue Date 12/03/2019
+     * Expiry 11/03/2029") and labels side by side with their dates on the line below, column by column
+     * ("Date of Issue    Date of Expiry" / "12/03/2019    11/03/2029").
+     */
+    private fun labelledDates(lines: List<String>): Map<String, String> {
+        val out = LinkedHashMap<String, String>()
+        fun labels(l: String) = DATE_LABELS.flatMap { (k, re) -> re.findAll(l).map { Triple(it.range.first, it.range.last + 1, k) }.toList() }.sortedBy { it.first }
+        for ((i, l) in lines.withIndex()) {
+            val hits = labels(l)
+            if (hits.isEmpty()) continue
+            val waiting = mutableListOf<String>()
+            hits.forEachIndexed { j, (_, end, key) ->
+                val stop = maxOf(end, hits.getOrNull(j + 1)?.first ?: l.length)
+                val ds = DATE_ANY.findAll(l.substring(end, stop)).map(::normDate).toList()
+                if (ds.isEmpty()) waiting += key else out.putIfAbsent(key, ds[0])
+                // "Valid from 12/03/2019 to 11/03/2029": one label, both dates
+                if (key == "issued" && ds.size >= 2 && hits.none { it.third == "expiry" }) out.putIfAbsent("expiry", ds[1])
+            }
+            if (waiting.isEmpty()) continue
+            // their dates on the next line, in the same order as the labels (skip a line that has labels of its own)
+            val next = lines.getOrNull(i + 1)?.takeIf { labels(it).isEmpty() } ?: continue
+            val ds = DATE_ANY.findAll(next).map(::normDate).toList()
+            if (ds.size >= waiting.size) waiting.forEachIndexed { k, key -> out.putIfAbsent(key, ds[k]) }
+        }
+        return out
+    }
+
+    private val DATE_DEFAULTS = mapOf("issued" to "Date of Issue", "expiry" to "Valid Until", "dob" to "Date of Birth")
+
+    /**
+     * Adds the labelled dates a parser didn't fill (under the document type's own wording for them), and corrects a
+     * date that was taken from the wrong column. [issuedLabel]: what to call the issue date when the type has none.
+     */
+    private fun withDates(r: Result, labelled: Map<String, String>, hint: String?, issuedLabel: String? = null): Result {
+        if (labelled.isEmpty()) return r
+        val template = DocTypes.template(hint.orEmpty())
+        val fields = r.fields.toMutableList()
+        labelled.forEach { (key, date) ->
+            val at = fields.indexOfFirst { FieldKeys.canonical(it.label) == key }
+            when {
+                // the machine-readable zone's own dates are checked: they stay
+                at >= 0 && fields[at].verified == true -> Unit
+                at >= 0 && fields[at].value.isBlank() -> fields[at] = fields[at].copy(value = date, auto = true)
+                at >= 0 -> if (key == "expiry" && fields[at].value == labelled["issued"]) fields[at] = fields[at].copy(value = date)
+                else -> fields += f(template.firstOrNull { FieldKeys.canonical(it) == key } ?: (if (key == "issued") issuedLabel else null) ?: DATE_DEFAULTS.getValue(key), date)
+            }
+        }
+        return r.copy(fields = fields)
     }
 
     // ---------------- checksums ----------------
@@ -293,13 +354,16 @@ object DocumentParser {
 
     // ---------------- generic ----------------
     private enum class Kind { DATE, YEAR, NUMBER, TEXT }
-    private val DATE_ANY = Regex("\\b(\\d{1,2})[/\\-.](\\d{1,2})[/\\-.]((?:19|20)\\d{2})\\b|\\b(\\d{1,2}) ?(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[A-Z]* ?((?:19|20)\\d{2})\\b", RegexOption.IGNORE_CASE)
+    private val DATE_ANY = Regex("\\b(\\d{1,2})[/\\-.](\\d{1,2})[/\\-.]((?:19|20)\\d{2})\\b|\\b(\\d{1,2})[ .\\-]?(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[A-Z]*\\.?[ .\\-]?((?:19|20)\\d{2})\\b|\\b((?:19|20)\\d{2})[/\\-.](\\d{1,2})[/\\-.](\\d{1,2})\\b", RegexOption.IGNORE_CASE)
     private val MONTHS = listOf("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
 
     private fun normDate(m: MatchResult): String {
         val g = m.groupValues
-        return if (g[1].isNotEmpty()) "${g[1].padStart(2, '0')}/${g[2].padStart(2, '0')}/${g[3]}"
-        else "${g[4].padStart(2, '0')}/${(MONTHS.indexOf(g[5].take(3).uppercase()) + 1).toString().padStart(2, '0')}/${g[6]}"
+        return when {
+            g[1].isNotEmpty() -> "${g[1].padStart(2, '0')}/${g[2].padStart(2, '0')}/${g[3]}"
+            g[4].isNotEmpty() -> "${g[4].padStart(2, '0')}/${(MONTHS.indexOf(g[5].take(3).uppercase()) + 1).toString().padStart(2, '0')}/${g[6]}"
+            else -> "${g[9].padStart(2, '0')}/${g[8].padStart(2, '0')}/${g[7]}" // 2019-03-12
+        }
     }
     private fun dateKey(d: String) = d.split('/').let { (dd, mm, yy) -> yy + mm + dd }
 
@@ -338,7 +402,7 @@ object DocumentParser {
         return when (kind) {
             Kind.DATE -> DATE_ANY.find(c)?.let(::normDate)
             Kind.YEAR -> Regex("\\b(?:19|20)\\d{2}\\b").find(c)?.value
-            Kind.NUMBER -> Regex("[A-Z0-9][A-Z0-9/\\-]{3,}", RegexOption.IGNORE_CASE).findAll(c).map { it.value }.firstOrNull { t -> t.count(Char::isDigit) >= 3 }
+            Kind.NUMBER -> Regex("[A-Z0-9][A-Z0-9/\\-]{3,}", RegexOption.IGNORE_CASE).findAll(c).map { it.value }.firstOrNull { t -> t.count(Char::isDigit) >= 3 && DATE_ANY.matchEntire(t) == null } // not a date
             Kind.TEXT -> c.takeIf { it.length in 2..60 && it.count(Char::isLetter) >= 2 && !it.endsWith(":") && !it.lowercase().matches(Regex("(of|in|the|and|to|for|by|on|at|is|no)\\.?")) }
         }
     }
@@ -375,7 +439,7 @@ object DocumentParser {
         return out
     }
 
-    private fun parseGeneric(text: String, lines: List<String>, up: String, hint: String?): Result {
+    private fun parseGeneric(text: String, lines: List<String>, up: String, hint: String?, labelled: Map<String, String> = emptyMap()): Result {
         val fields = mutableListOf<DocField>()
         fun has(label: String) = fields.any { FieldKeys.same(it.label, label) }
         // 1. The preset fields for this kind of document, found by their wording on the card.
@@ -383,6 +447,8 @@ object DocumentParser {
         if (!hint.isNullOrBlank() && DocTypes.forName(hint).key == "education") education(lines, text).forEach { (l, v) -> if (!has(l) && v.isNotBlank()) fields += f(l, v) }
         for (label in template) {
             if (has(label)) continue
+            // dates: read by [labelledDates], which also handles labels side by side (added in [withDates])
+            if (FieldKeys.canonical(label) in labelled) continue
             val (re, kind) = lookup(label)
             find(lines, re, kind)?.let { v ->
                 val value = if (FieldKeys.canonical(label) == "sex") when (v.trim().uppercase().firstOrNull()) { 'M' -> "Male"; 'F' -> "Female"; else -> v } else v
@@ -395,14 +461,22 @@ object DocumentParser {
         Regex("\\b([A-Z]{2}\\d{2}(?: ?[A-Z0-9]){11,30})\\b").find(up)?.let { m ->
             if (fields.none { it.label.contains("iban", true) }) fields += f("IBAN", m.groupValues[1].replace(" ", "").chunked(4).joinToString(" "))
         }
-        // 3. For a known kind of document, unlabelled dates: the latest is the expiry, the earliest a birth date.
+        // 3. For a known kind of document, unlabelled dates: the latest is the expiry, the earliest a birth date, and
+        //    the last one before today (after any birth date) the issue date.
         val dates = DATE_ANY.findAll(text).map(::normDate).distinct().sortedBy(::dateKey).toList()
         if (!hint.isNullOrBlank() && dates.isNotEmpty()) {
             val now = Year.now().value
-            template.firstOrNull { FieldKeys.canonical(it) == "expiry" && !has(it) }?.let { l -> dates.last().takeIf { it.takeLast(4).toInt() >= now - 1 }?.let { fields += f(l, it) } }
-            template.firstOrNull { FieldKeys.canonical(it) == "dob" && !has(it) }?.let { l -> dates.first().takeIf { it.takeLast(4).toInt() <= now - 5 }?.let { fields += f(l, it) } }
+            val taken = mutableSetOf<String>()
+            fun hasKey(k: String) = fields.any { FieldKeys.canonical(it.label) == k } || k in labelled
+            if (!hasKey("expiry")) template.firstOrNull { FieldKeys.canonical(it) == "expiry" }?.let { l ->
+                dates.last().takeIf { it.takeLast(4).toInt() >= now - 1 }?.let { fields += f(l, it); taken += it } }
+            if (!hasKey("dob")) template.firstOrNull { FieldKeys.canonical(it) == "dob" }?.let { l ->
+                // (with only two dates the earlier is more likely the issue date, unless it's long ago)
+                dates.first().takeIf { it !in taken && it.takeLast(4).toInt() <= now - (if (dates.size >= 3) 5 else 15) }?.let { fields += f(l, it); taken += it } }
+            if (!hasKey("issued")) template.firstOrNull { FieldKeys.canonical(it) == "issued" }?.let { l ->
+                dates.lastOrNull { it !in taken && it.takeLast(4).toInt() <= now }?.let { fields += f(l, it) } }
         }
-        if (fields.isEmpty()) dates.firstOrNull()?.let { fields += f("Date", it) }
+        if (fields.isEmpty() && labelled.isEmpty()) dates.firstOrNull()?.let { fields += f("Date", it) }
         return Result("other", null, fields)
     }
 }

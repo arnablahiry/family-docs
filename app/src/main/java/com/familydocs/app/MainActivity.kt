@@ -89,7 +89,7 @@ class MainActivity : FragmentActivity() {
                         Box(Modifier.fillMaxSize().drawWithContent {
                             screen.record { this@drawWithContent.drawContent() }
                             drawLayer(screen)
-                        }) { AppRoot(this@MainActivity) }
+                        }) { com.familydocs.app.ui.ds.FdEndTypingOnTapOutside(Modifier.fillMaxSize()) { AppRoot(this@MainActivity) } }
                         ThemeRevealOverlay(reveal)
                     }
                 }
