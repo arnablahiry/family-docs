@@ -55,7 +55,14 @@ data class Peer(val key: String, val name: String, val index: String, val at: Lo
                 val pub: String? = null,
                 /** Whether their share lists you, i.e. they've added your invite (null: not read yet / older version). */
                 val sees: Boolean? = null) {
+    /** Both ways: you read their share, and theirs lists you (they read yours). */
+    val synced: Boolean get() = sees == true && at > 0L
+
     companion object {
+        /** "Mohua", "Mohua and Teesta", "Arnab, Mohua and Teesta". */
+        fun names(list: List<String>): String = when (list.size) {
+            0 -> ""; 1 -> list[0]; else -> list.dropLast(1).joinToString(", ") + " and " + list.last()
+        }
         fun encode(list: List<Peer>): String? = if (list.isEmpty()) null else JSONArray(list.map {
             JSONObject().put("key", it.key).put("name", it.name).put("index", it.index).put("at", it.at).put("err", it.err ?: JSONObject.NULL).put("pub", it.pub ?: JSONObject.NULL)
                 .put("sees", it.sees ?: JSONObject.NULL) }).toString()

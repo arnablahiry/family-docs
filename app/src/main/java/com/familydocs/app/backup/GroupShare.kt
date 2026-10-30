@@ -147,11 +147,14 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
             err
         }
         if (accessToken == null) BackupWorker.syncShares(context)
-        Accepted(dao.groupNow(g.id)!!, problem, inv.fromName, inv.from, joined = existing == null)
+        val now = dao.groupNow(g.id)!!
+        Accepted(now, problem, inv.fromName, inv.from, joined = existing == null, synced = now.peerList.firstOrNull { it.key == peer.key }?.sees == true)
     }
 
     /** A joined (or updated) group, a problem reading the sender's share if there was one, and who sent the invite. */
-    data class Accepted(val group: GroupEntity, val problem: String?, val fromName: String, val fromKey: String, val joined: Boolean)
+    data class Accepted(val group: GroupEntity, val problem: String?, val fromName: String, val fromKey: String, val joined: Boolean,
+                        /** Their share already lists you: the two of you are synced both ways. */
+                        val synced: Boolean)
 
     /** Stops reading [peerKey]'s share and removes what they shared from this phone. */
     suspend fun forget(groupId: String, peerKey: String) = withContext(Dispatchers.IO) {
@@ -348,6 +351,8 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
         val known = now.peerList.associateBy { it.key }.toMutableMap()
         val sees = (0 until (j.optJSONArray("peers")?.length() ?: 0)).any { j.getJSONArray("peers").getJSONObject(it).optString("key") == myKey }
         known[p.key] = p.copy(name = by, at = System.currentTimeMillis(), err = null, pub = j.optStringOrNull("pub") ?: p.pub, sees = sees)
+        // They've just added you (you were waiting for it): say so once.
+        if (p.sees == false && sees) addNotice(grp, by, "You and $by are now synced!", "check")
         val gone = synchronized(prefs) { longMap("handled:${g.id}") }
         j.optJSONArray("peers")?.forEachObj { o -> val pk = o.getString("key")
             if (pk != myKey && pk !in known && System.currentTimeMillis() - (gone[pk] ?: 0L) > REMOVED_QUIET) known[pk] = Peer(pk, o.optString("name"), o.getString("index")) }
@@ -407,19 +412,19 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
     // ---------------- admins ----------------
 
     /** Something an admin changed in your things (or about you), shown on Home until you close it. */
-    data class Notice(val id: String, val groupId: String, val by: String, val text: String, val at: Long)
+    data class Notice(val id: String, val groupId: String, val by: String, val text: String, val at: Long, val icon: String = "shield")
     val notices = kotlinx.coroutines.flow.MutableStateFlow(loadNotices())
     fun dismissNotice(id: String) = synchronized(prefs) { saveNotices(notices.value.filter { it.id != id }) }
     private fun loadNotices(): List<Notice> = runCatching {
         val a = JSONArray(prefs.getString("notices", "[]"))
-        (0 until a.length()).map { a.getJSONObject(it).let { o -> Notice(o.getString("id"), o.optString("g"), o.optString("by"), o.getString("t"), o.optLong("at")) } }
+        (0 until a.length()).map { a.getJSONObject(it).let { o -> Notice(o.getString("id"), o.optString("g"), o.optString("by"), o.getString("t"), o.optLong("at"), o.optString("i").ifEmpty { "shield" }) } }
     }.getOrDefault(emptyList())
     private fun saveNotices(list: List<Notice>) {
-        prefs.edit().putString("notices", JSONArray(list.map { JSONObject().put("id", it.id).put("g", it.groupId).put("by", it.by).put("t", it.text).put("at", it.at) }).toString()).apply()
+        prefs.edit().putString("notices", JSONArray(list.map { JSONObject().put("id", it.id).put("g", it.groupId).put("by", it.by).put("t", it.text).put("at", it.at).put("i", it.icon) }).toString()).apply()
         notices.value = list
     }
-    private fun addNotice(g: GroupEntity, by: String, text: String) = synchronized(prefs) {
-        saveNotices((notices.value + Notice(java.util.UUID.randomUUID().toString(), g.id, by, text, System.currentTimeMillis())).takeLast(20))
+    private fun addNotice(g: GroupEntity, by: String, text: String, icon: String = "shield") = synchronized(prefs) {
+        saveNotices((notices.value + Notice(java.util.UUID.randomUUID().toString(), g.id, by, text, System.currentTimeMillis(), icon)).takeLast(20))
     }
 
     private fun jsonList(key: String): MutableList<JSONObject> = runCatching {
@@ -639,7 +644,7 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
         g.peerList.forEach { removeFrom(g, it.key, emptySet(), emptySet(), emptySet()) }
         dao.upsertGroup(g.copy(peers = null, creator = null, admins = null, adminsAt = 0L))
         synchronized(prefs) { saveOps(g.id, emptyList()) }
-        addNotice(g, by, "$by removed you from ${g.name}. Your own documents and the Common vault stay on this phone. If it was a mistake, ask to join again with the group's code.")
+        addNotice(g, by, "$by removed you from ${g.name}. Your own documents and the Common vault stay on this phone. If it was a mistake, ask someone in it for a new invite.")
     }
 
     /**

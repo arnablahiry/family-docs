@@ -104,6 +104,7 @@ fun GroupSettingsSheet(groupId: String, intro: String? = null, joinedFrom: Strin
     var managing by remember { mutableStateOf<String?>(null) }
     var removing by remember { mutableStateOf<String?>(null) }
     var croppingFor by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    var cropStart by remember { mutableStateOf<com.familydocs.app.data.PhotoSources.Source?>(null) }
     val sendInvite = rememberInviteSender { busy = if (it) "Preparing the invite…" else null }
     // Just joined: your own invite goes back to whoever invited you (the share sheet opens by itself, once).
     if (intro == "joined") androidx.compose.runtime.LaunchedEffect(g.id) { kotlinx.coroutines.delay(700); sendInvite(g.id) }
@@ -143,7 +144,11 @@ fun GroupSettingsSheet(groupId: String, intro: String? = null, joinedFrom: Strin
             val ownPhoto = com.familydocs.app.ui.components.rememberVaultImage(g.photoFile, 300)
             GroupPicPicker(if (g.photoFile != null) "photo" else "default", ownPhoto,
                 onTemplate = { k -> scope.launch { app.repo.setGroupPicture(g.id, k, null) } },
-                onPhoto = { uri -> scope.launch { croppingFor = readPhoto(context, uri) } })
+                onPhoto = { uri -> scope.launch { cropStart = null; croppingFor = readPhoto(context, uri) } })
+            if (g.photoFile != null) Box(Modifier.padding(top = 8.dp)) {
+                com.familydocs.app.ui.ds.FdChip("Edit photo", false, { scope.launch { loadPhotoSource(app, g.photoFile)?.let { s -> cropStart = s; croppingFor = s.bitmap } ?: toast.show("Couldn't open the picture") } },
+                    leading = { FdIcon("edit", 16.dp, tint = c.fg) })
+            }
             Spacer(Modifier.height(18.dp))
             when (intro) {
                 "created" -> FdBanner("info", "Backups: by default your Drive keeps you and this group's Common vault; you can switch to the whole group below, any time. " +
@@ -174,6 +179,18 @@ fun GroupSettingsSheet(groupId: String, intro: String? = null, joinedFrom: Strin
             val peers = g.peerList
             val unseen = if (peers.isNotEmpty() && peers.all { it.sees == false }) peers else emptyList()
             if (peers.isNotEmpty()) {
+                val notYet = peers.filter { !it.synced }
+                val names = { l: List<com.familydocs.app.data.Peer> -> com.familydocs.app.data.Peer.names(l.map { it.name.ifBlank { "Someone" } }) }
+                Row(Modifier.padding(bottom = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FdIcon(if (notYet.isEmpty()) "check" else "refresh", 16.dp, tint = if (notYet.isEmpty()) c.accent else c.muted)
+                    Text(when {
+                        notYet.isEmpty() -> "You and ${names(peers)} are synced."
+                        notYet.size == peers.size -> "${names(notYet)} ${if (notYet.size == 1) "isn't" else "aren't"} synced yet."
+                        else -> "You and ${names(peers - notYet.toSet())} are synced; ${names(notYet)} ${if (notYet.size == 1) "isn't" else "aren't"} yet."
+                    }, style = fdText(13f, FontWeight.Medium))
+                }
+            }
+            if (peers.isNotEmpty()) {
                 val adminNames = g.adminKeys.mapNotNull { k -> if (k == self?.id) "you" else peers.firstOrNull { it.key == k }?.name }
                 Text(when {
                     iAdmin -> "You're an admin: you can change anyone's documents and profile, make others admins and remove people. They see a note when you do."
@@ -192,8 +209,11 @@ fun GroupSettingsSheet(groupId: String, intro: String? = null, joinedFrom: Strin
                 peers.forEach { p ->
                     val m = groupMembers.firstOrNull { it.origin == p.key && !it.shared }
                     PersonRow(p.name.ifBlank { m?.name ?: "Group member" }, m, listOfNotNull(role(p.key), docs(m?.id)).joinToString(" · "),
-                        status = (if (p.at == 0L) "Not read yet" else "Updated " + android.text.format.DateUtils.getRelativeTimeSpanString(p.at)) +
-                            if (unseen.isNotEmpty()) " · hasn't added you yet" else "",
+                        status = when {
+                            p.at == 0L -> "Not synced yet · not read yet"
+                            p.sees == false -> "Not synced yet · hasn't added you yet"
+                            else -> "Synced · updated " + android.text.format.DateUtils.getRelativeTimeSpanString(p.at)
+                        },
                         error = p.err?.let { "Last sync: $it" }, first = first, onClick = m?.let { open(it.id) }) {
                         when {
                             iAdmin && p.key != g.creator -> FdIconButton("sliders", { managing = p.key }, size = 36.dp, iconSize = 17.dp, tint = c.muted, description = "Manage ${p.name}")
@@ -224,7 +244,8 @@ fun GroupSettingsSheet(groupId: String, intro: String? = null, joinedFrom: Strin
             Spacer(Modifier.height(8.dp))
         }
     }
-    croppingFor?.let { bmp -> GroupPhotoCropSheet(bmp, onDone = { bytes, _ -> scope.launch { app.repo.setGroupPicture(g.id, null, bytes) }; croppingFor = null }, onDismiss = { croppingFor = null }) }
+    croppingFor?.let { bmp -> PhotoCropSheet(bmp, "Group picture", start = cropStart, onDone = { p ->
+        scope.launch { app.repo.setGroupPicture(g.id, null, p.bytes); p.keep(app) }; croppingFor = null }, onDismiss = { croppingFor = null }) }
     managing?.let { key ->
         val name = g.peerList.firstOrNull { it.key == key }?.name ?: "Member"
         val isAdmin = key in g.adminKeys
@@ -312,7 +333,10 @@ fun JoinGroupSheet(onJoined: (groupId: String, invitedBy: String?) -> Unit, onDi
                         // publishes your share and reads theirs in the background (needs Drive)
                         com.familydocs.app.backup.BackupWorker.syncShares(app.appContext)
                         if (r.joined) onJoined(r.group.id, r.fromName)
-                        else { toast.show("${r.fromName} is in ${r.group.name} now. Their documents come in with the sync."); onJoined(r.group.id, null) }
+                        else {
+                            toast.show(if (r.synced) "You and ${r.fromName} are now synced!" else "${r.fromName} is added. You're synced once their phone picks you up.")
+                            onJoined(r.group.id, null)
+                        }
                         onDismiss()
                     }.onFailure { error = it.message ?: "Couldn't use that invite" }
                 } else {
@@ -377,24 +401,39 @@ suspend fun readPhoto(context: android.content.Context, uri: android.net.Uri): a
         runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() }?.let { com.familydocs.app.ocr.Images.decode(it, 1600) } }.getOrNull()
     }
 
-/** Position and zoom a picked photo in the circle (the same cropper as people's photos); [onDone] gets the saved JPEG. */
+/** A cropped picture, and how it was framed (so it can be kept for a later "Edit photo"). */
+class CroppedPhoto(val bytes: ByteArray, val image: androidx.compose.ui.graphics.ImageBitmap, val original: android.graphics.Bitmap,
+                   val zoom: Float, val panX: Float, val panY: Float, val originalId: String?) {
+    /** Remembers the original behind [bytes] once they're saved (off the main thread). */
+    suspend fun keep(app: com.familydocs.app.AppContainer) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        runCatching { app.photoSources.keep(bytes, original, zoom, panX, panY, originalId) }
+    }
+}
+
+/** Position and zoom a photo in the circle (the same cropper as people's photos); [onDone] gets the saved JPEG. */
 @Composable
-fun GroupPhotoCropSheet(bitmap: android.graphics.Bitmap, onDone: (ByteArray, androidx.compose.ui.graphics.ImageBitmap) -> Unit, onDismiss: () -> Unit) {
+fun PhotoCropSheet(bitmap: android.graphics.Bitmap, title: String, onDone: (CroppedPhoto) -> Unit, onDismiss: () -> Unit,
+                   start: com.familydocs.app.data.PhotoSources.Source? = null, out: Int = 512) {
     val scope = rememberCoroutineScope()
-    val crop = remember(bitmap) { com.familydocs.app.ui.ds.CropState() }
     val box = com.familydocs.app.ui.ds.cropBoxPx()
+    val crop = remember(bitmap) { com.familydocs.app.ui.ds.CropState().apply {
+        start?.let { zoom = it.zoom; pan = androidx.compose.ui.geometry.Offset(it.panX * box, it.panY * box) } } }
     FdSheet(onDismiss) {
-        SheetTitle("Group picture", "Drag and zoom so the circle shows what you want.")
+        SheetTitle(title, "Drag and zoom so the circle shows what you want.")
         com.familydocs.app.ui.ds.FdPhotoCropper(bitmap, crop) {}
         FdButton("Use this photo", {
             scope.launch {
-                val sq = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { com.familydocs.app.ui.ds.cropToSquare(bitmap, crop, box) }
-                onDone(com.familydocs.app.ocr.Images.jpeg(sq), sq.asImageBitmap())
+                val sq = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { com.familydocs.app.ui.ds.cropToSquare(bitmap, crop, box, out) }
+                onDone(CroppedPhoto(com.familydocs.app.ocr.Images.jpeg(sq), sq.asImageBitmap(), bitmap, crop.zoom, crop.pan.x / box, crop.pan.y / box, start?.originalId))
             }
         }, Modifier.padding(top = 14.dp))
         Spacer(Modifier.height(12.dp))
     }
 }
+
+/** Loads a saved picture for "Edit photo" (its original and framing when this phone has them). */
+suspend fun loadPhotoSource(app: com.familydocs.app.AppContainer, photoFile: String?): com.familydocs.app.data.PhotoSources.Source? =
+    photoFile?.let { f -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { app.photoSources.load(f) }.getOrNull() } }
 
 /** New group: name and picture (the illustration, or your own photo). */
 @Composable
@@ -404,21 +443,21 @@ fun NewGroupSheet(onCreated: (com.familydocs.app.data.GroupEntity) -> Unit, onDi
     val scope = rememberCoroutineScope()
     var name by remember { mutableStateOf("") }
     val pic = com.familydocs.app.domain.GroupPics.DEFAULT
-    var photo by remember { mutableStateOf<Pair<ByteArray, androidx.compose.ui.graphics.ImageBitmap>?>(null) }
+    var photo by remember { mutableStateOf<CroppedPhoto?>(null) }
     var cropping by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
     var busy by remember { mutableStateOf(false) }
     FdSheet(onDismiss) {
         SheetTitle("New group", "Its own people, Common vault, events and code. You're in every group.")
         FdInput(name, { name = it }, placeholder = "Group name, e.g. Flatmates")
         Label2("Picture")
-        GroupPicPicker(if (photo != null) "photo" else pic, photo?.second, onTemplate = { photo = null },
+        GroupPicPicker(if (photo != null) "photo" else pic, photo?.image, onTemplate = { photo = null },
             onPhoto = { uri -> scope.launch { cropping = readPhoto(context, uri) } })
         FdButton(if (busy) "Creating…" else "Create group", {
-            scope.launch { busy = true; val g = app.repo.createGroup(name, pic, photo?.first); busy = false; onCreated(g); onDismiss() }
+            scope.launch { busy = true; val g = app.repo.createGroup(name, pic, photo?.bytes); photo?.keep(app); busy = false; onCreated(g); onDismiss() }
         }, Modifier.padding(top = 16.dp), enabled = name.isNotBlank() && !busy)
         Spacer(Modifier.height(12.dp))
     }
-    cropping?.let { bmp -> GroupPhotoCropSheet(bmp, onDone = { bytes, img -> photo = bytes to img; cropping = null }, onDismiss = { cropping = null }) }
+    cropping?.let { bmp -> PhotoCropSheet(bmp, "Group picture", onDone = { p -> photo = p; cropping = null }, onDismiss = { cropping = null }) }
 }
 
 @Composable

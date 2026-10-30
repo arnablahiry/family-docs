@@ -323,7 +323,10 @@ fun EditEventScreen(eventId: String?, onBack: () -> Unit, onSaved: (id: String, 
     var name by remember { mutableStateOf("") }
     var art by remember { mutableStateOf("trip") }
     var artTouched by remember { mutableStateOf(false) }
-    var photo by remember { mutableStateOf<Bitmap?>(null) }
+    // a picked (or re-edited) photo, cropped in the circle
+    var photo by remember { mutableStateOf<com.familydocs.app.ui.home.CroppedPhoto?>(null) }
+    var cropping by remember { mutableStateOf<Bitmap?>(null) }
+    var cropStart by remember { mutableStateOf<com.familydocs.app.data.PhotoSources.Source?>(null) }
     var removePhoto by remember { mutableStateOf(false) }
     var start by remember { mutableStateOf(LocalDate.now().plusDays(14)) }
     var end by remember { mutableStateOf<LocalDate?>(null) }
@@ -348,8 +351,8 @@ fun EditEventScreen(eventId: String?, onBack: () -> Unit, onSaved: (id: String, 
     val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         uri ?: return@rememberLauncherForActivityResult
         scope.launch {
-            photo = withContext(Dispatchers.IO) { context.contentResolver.openInputStream(uri)?.use { it.readBytes() }?.let { Images.decode(it, 1200) } }
-            if (photo != null) removePhoto = false
+            cropStart = null
+            cropping = withContext(Dispatchers.IO) { context.contentResolver.openInputStream(uri)?.use { it.readBytes() }?.let { Images.decode(it, 1600) } }
         }
     }
     val notifPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
@@ -363,7 +366,7 @@ fun EditEventScreen(eventId: String?, onBack: () -> Unit, onSaved: (id: String, 
         scope.launch {
             val photoId = withContext(Dispatchers.IO) {
                 when {
-                    photo != null -> { app.files.delete(old?.photoFile); app.files.put(Images.centerSquareJpeg(photo!!, 700)) }
+                    photo != null -> { app.files.delete(old?.photoFile); app.files.put(photo!!.bytes) }
                     removePhoto -> { app.files.delete(old?.photoFile); null }
                     else -> old?.photoFile
                 }
@@ -374,18 +377,21 @@ fun EditEventScreen(eventId: String?, onBack: () -> Unit, onSaved: (id: String, 
                 people = people.joinToString(","), visibleTo = (visible + me).joinToString(","), remindDays = remind, notes = notes.trim(),
             )
             app.repo.saveEvent(e)
+            photo?.let { p -> app.appScope.launch { p.keep(app) } }
             EventReminders.schedule(context, e)
             toast.show(if (old == null) "Event added" else "Saved")
             onSaved(e.id, old == null)
         }
     }
 
+    cropping?.let { bmp -> com.familydocs.app.ui.home.PhotoCropSheet(bmp, "Event picture", start = cropStart, out = 700,
+        onDone = { p -> photo = p; removePhoto = false; cropping = null }, onDismiss = { cropping = null }) }
     Column(Modifier.fillMaxSize().background(c.bg).statusBarsPadding().imePadding()) {
         FdTopBar(if (eventId == null) "New event" else "Edit event", onBack) { FdTextButton("Save", ::save) }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                 val p = photo
-                if (p != null) Image(p.asImageBitmap(), null, Modifier.size(132.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+                if (p != null) Image(p.image, null, Modifier.size(132.dp).clip(CircleShape), contentScale = ContentScale.Crop)
                 else FdEventPic(art, old?.photoFile?.takeIf { !removePhoto }, 132.dp, lift = true)
             }
             FdField("Picture") {
@@ -399,6 +405,9 @@ fun EditEventScreen(eventId: String?, onBack: () -> Unit, onSaved: (id: String, 
                     }
                 }
                 FdChips(Modifier.padding(top = 4.dp)) {
+                    if (old?.photoFile != null && photo == null && !removePhoto) FdChip("Edit photo", false, {
+                        scope.launch { com.familydocs.app.ui.home.loadPhotoSource(app, old?.photoFile)?.let { s -> cropStart = s; cropping = s.bitmap } ?: toast.show("Couldn't open the photo") }
+                    }, leading = { FdIcon("edit", 16.dp, tint = c.fg) })
                     FdChip(if (hasPhoto) "Change photo" else "Use a photo", false, {
                         app.appLock.expectExternalActivity(); photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                     }, leading = { FdIcon("image", 16.dp, tint = c.fg) })

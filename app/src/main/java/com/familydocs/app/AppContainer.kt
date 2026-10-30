@@ -42,6 +42,8 @@ class AppContainer(context: Context) {
     val updater = com.familydocs.app.update.AppUpdater(app)
     /** An invite that opened the app (tapped link or shared text), waiting for Home or sign-up to use it. */
     val incomingInvite = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    /** Originals behind cropped pictures, for "Edit photo". */
+    val photoSources by lazy { com.familydocs.app.data.PhotoSources(app, files) }
     /** The "what's new" note on Home after an update. */
     val whatsNew by lazy { com.familydocs.app.update.WhatsNew(app) }
     /** Optional backup password for logins (Settings › Backup). */
@@ -81,6 +83,7 @@ class AppContainer(context: Context) {
         repo.groupId.value = null
         pwPin.clear()
         com.familydocs.app.ui.components.VaultImages.clear()
+        photoSources.clear()
         loginLock.clear()
         passcode.clear() // last: this is what switches the app back to the welcome screen
     }

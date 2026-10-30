@@ -82,6 +82,8 @@ fun EditMemberScreen(memberId: String?, onBack: () -> Unit, onDeleted: () -> Uni
     var canEdit by remember { mutableStateOf(true) }
     val crop = remember { CropState() }
     val box = cropBoxPx()
+    /** Editing the saved photo: its original (when this phone has it), so a re-save reuses it. */
+    var editingFrom by remember { mutableStateOf<com.familydocs.app.data.PhotoSources.Source?>(null) }
 
     LaunchedEffect(memberId) {
         val m = memberId?.let { app.repo.memberNow(it) }
@@ -96,8 +98,13 @@ fun EditMemberScreen(memberId: String?, onBack: () -> Unit, onDeleted: () -> Uni
         uri ?: return@rememberLauncherForActivityResult
         scope.launch {
             picked = withContext(Dispatchers.IO) { context.contentResolver.openInputStream(uri)?.use { it.readBytes() }?.let { Images.decode(it, 1600) } }
-            crop.zoom = 1f; crop.pan = Offset.Zero; removePhoto = false
+            crop.zoom = 1f; crop.pan = Offset.Zero; removePhoto = false; editingFrom = null
         }
+    }
+    /** Reopens the current photo in the cropper (the whole original, framed as it was, when this phone has it). */
+    fun editPhoto() = scope.launch {
+        val s = com.familydocs.app.ui.home.loadPhotoSource(app, existingPhoto) ?: run { toast.show("Couldn't open the photo"); return@launch }
+        picked = s.bitmap; crop.zoom = s.zoom; crop.pan = Offset(s.panX * box, s.panY * box); editingFrom = s
     }
     fun choosePhoto() { app.appLock.expectExternalActivity(); picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
     val hasPhoto = picked != null || (existingPhoto != null && !removePhoto)
@@ -106,8 +113,11 @@ fun EditMemberScreen(memberId: String?, onBack: () -> Unit, onDeleted: () -> Uni
         if (name.isBlank()) { toast.show("Add a name first"); return }
         scope.launch {
             val bytes = picked?.let { bmp -> withContext(Dispatchers.Default) { Images.jpeg(cropToSquare(bmp, crop, box)) } }
+            val original = picked; val z = crop.zoom; val px = crop.pan.x / box; val py = crop.pan.y / box; val from = editingFrom?.originalId
             runCatching { app.repo.saveMember(memberId, name.trim(), when { isSelf -> "You"; isShared -> "Shared"; else -> relation }, bytes, keepPhoto = !removePhoto, avatar = avatar) }
                 .onSuccess {
+                    // keep the whole photo too, for the next "Edit photo"
+                    if (bytes != null && original != null) app.appScope.launch(Dispatchers.IO) { runCatching { app.photoSources.keep(bytes, original, z, px, py, from) } }
                     toast.show(when { memberId == null -> "Added ${name.trim()}"; peer -> "Saved. ${name.trim()}'s phone takes it over when it next syncs"; else -> "Saved" })
                     onBack()
                 }.onFailure { toast.show(it.message ?: "Couldn't save") }
@@ -131,6 +141,7 @@ fun EditMemberScreen(memberId: String?, onBack: () -> Unit, onDeleted: () -> Uni
             }
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                 FdChips {
+                    if (existingPhoto != null && picked == null && !removePhoto && canEdit) FdChip("Edit photo", false, { editPhoto() }, leading = { FdIcon("edit", 16.dp, tint = c.fg) })
                     FdChip(if (hasPhoto) "Change photo" else "Choose photo", false, ::choosePhoto, leading = { FdIcon("image", 16.dp, tint = c.fg) })
                     if (hasPhoto) FdChip("Remove photo", false, { picked = null; removePhoto = true }, leading = { FdIcon("trash", 16.dp, tint = c.fg) })
                 }

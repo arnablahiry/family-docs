@@ -135,18 +135,28 @@ fun FamilyScreen(onMember: (String) -> Unit, onSettings: () -> Unit, onDocument:
         // What a group admin changed in your things (or about you): stays until you close it.
         val notes by app.share.notices.collectAsStateWithLifecycle()
         notes.takeLast(3).reversed().forEach { n ->
-            FdBanner("shield", n.text, Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 6.dp)) {
+            FdBanner(n.icon, n.text, Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 6.dp)) {
                 FdIconButton("close", { app.share.dismissNotice(n.id) }, size = 32.dp, iconSize = 15.dp, description = "Dismiss")
             }
         }
-        // You joined, but no one in the group has added your invite yet: nobody sees your things until someone does.
+        // Who isn't synced with you yet (both ways). No one has added you: send your invite. Otherwise their phones
+        // pick you up on their next sync; the note can be closed until the list changes.
         val shown = groups.firstOrNull { it.id == gid }
-        if (shown != null && shown.peerList.isNotEmpty() && shown.peerList.all { it.sees == false }) {
-            var sending by remember { mutableStateOf(false) }
-            val sendBack = com.familydocs.app.ui.home.rememberInviteSender { sending = it }
-            FdBanner("people", "No one in ${shown.name} has added you yet. Send them your invite: one tap on it adds you.",
-                Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 6.dp)) {
-                com.familydocs.app.ui.ds.FdTextButton(if (sending) "…" else "Send", { sendBack(shown.id) }, enabled = !sending)
+        val waiting = shown?.peerList.orEmpty().filter { !it.synced }
+        if (shown != null && waiting.isNotEmpty()) {
+            val nobody = shown.peerList.all { it.sees == false }
+            var hiddenFor by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+            val key = shown.id + waiting.joinToString { it.key }
+            if (nobody || hiddenFor != key) {
+                var sending by remember { mutableStateOf(false) }
+                val sendBack = com.familydocs.app.ui.home.rememberInviteSender { sending = it }
+                val who = com.familydocs.app.data.Peer.names(waiting.map { it.name.ifBlank { "Someone" } })
+                FdBanner("people", if (nobody) "No one in ${shown.name} has added you yet. Send them your invite: one tap on it adds you."
+                    else "$who ${if (waiting.size == 1) "isn't" else "aren't"} synced yet. ${if (waiting.size == 1) "Their phone picks" else "Their phones pick"} you up the next time they open Lararium.",
+                    Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 6.dp), accent = nobody) {
+                    if (nobody) com.familydocs.app.ui.ds.FdTextButton(if (sending) "…" else "Send", { sendBack(shown.id) }, enabled = !sending)
+                    else FdIconButton("close", { hiddenFor = key }, size = 32.dp, iconSize = 15.dp, description = "Dismiss")
+                }
             }
         }
         // First time after an update: what changed, until it's closed.
