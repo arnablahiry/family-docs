@@ -40,6 +40,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.key
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -134,7 +135,7 @@ fun FdEventPic(art: String, photoFile: String?, size: Dp, modifier: Modifier = M
     val photo = rememberVaultImage(photoFile, 700)
     val base = modifier.size(size).then(if (lift) Modifier.shadow(10.dp, CircleShape, ambientColor = Color(0x730A0F1E), spotColor = Color(0x730A0F1E)) else Modifier).clip(CircleShape)
     if (photo != null) Image(photo, null, base, contentScale = ContentScale.Crop)
-    else Image(painterResource(artRes(art)), null, base, contentScale = ContentScale.Crop)
+    else Image(fdPainter(artRes(art)), null, base, contentScale = ContentScale.Crop)
 }
 
 /** The demo's fallback hues for initials avatars and unknown document types. */
@@ -161,8 +162,8 @@ fun FdAvatar(
     val base = modifier.size(size).then(if (lift) Modifier.shadow(10.dp, CircleShape, ambientColor = Color(0x730A0F1E), spotColor = Color(0x730A0F1E)) else Modifier).clip(CircleShape)
     when {
         photo != null -> Image(photo, name, base.background(c.surface2), contentScale = ContentScale.Crop)
-        shared -> Image(painterResource(R.drawable.art_home), name, base, contentScale = ContentScale.Crop)
-        characterRes(character) != null -> Image(painterResource(characterRes(character)!!), name, base, contentScale = ContentScale.Crop)
+        shared -> Image(fdPainter(R.drawable.art_home), name, base, contentScale = ContentScale.Crop)
+        characterRes(character) != null -> Image(fdPainter(characterRes(character)!!), name, base, contentScale = ContentScale.Crop)
         else -> {
             val n = name.trim().ifEmpty { "?" }
             val ini = n.split(Regex("\\s+")).filter { it.isNotEmpty() }.take(2).joinToString("") { it.first().uppercase() }
@@ -184,7 +185,7 @@ fun FdFlag(code: String, width: Dp = 22.dp, ring: Color = Color(0x1F000000), gre
     val id = remember(code) { ctx.resources.getIdentifier("flag_" + code.lowercase(), "drawable", ctx.packageName) }
     val shape = RoundedCornerShape(3.dp)
     val m = Modifier.size(width, width * 2 / 3).border(1.dp, ring, shape).clip(shape).semantics { contentDescription = Countries.name(code) }
-    if (id != 0) Image(painterResource(id), null, m, contentScale = ContentScale.Crop,
+    if (id != 0) Image(fdPainter(id), null, m, contentScale = ContentScale.Crop,
         colorFilter = if (greyscale) ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) }) else null)
     else Box(m.background(Color(0x33808080)), contentAlignment = Alignment.Center) { Text(code, style = fdText(9f, FontWeight.Bold)) }
 }
@@ -291,9 +292,10 @@ fun FdWalletCard(
     /** Cast a shadow up onto the card behind it (every card in a stack but the first). */
     shadeAbove: Boolean = false,
     /** 1 = normal; lower fades the card towards the background (the others while one is lifted). Shadows stay. */
-    dim: Float = 1f,
+    /** (Lambdas: they animate, and are read only while drawing, so the card doesn't recompose every frame.) */
+    dim: () -> Float = { 1f },
     /** How strong that shadow is: it fades out (smoothly) where the card sits in a gap rather than on another card. */
-    shadeStrength: Float = 1f,
+    shadeStrength: () -> Float = { 1f },
 ) {
     val c = Fd.c
     val t = DocTypes.forName(doc.name)
@@ -320,7 +322,7 @@ fun FdWalletCard(
                 // Exactly as wide as the cards (no inset, no corners of its own), so its sides line up with the card
                 // edges; it runs on under this card's rounded top corners, where the card behind shows through.
                 val h = 26.dp.toPx(); val r = 18.dp.toPx()
-                val k = shadeStrength
+                val k = shadeStrength()
                 drawRect(Brush.verticalGradient(0f to Color.Transparent, .55f to Color.Black.copy(alpha = (if (c.dark) .32f else .16f) * k),
                     1f to Color.Black.copy(alpha = (if (c.dark) .62f else .38f) * k), startY = -h, endY = r),
                     topLeft = Offset(0f, -h), size = androidx.compose.ui.geometry.Size(size.width, h + r))
@@ -328,7 +330,9 @@ fun FdWalletCard(
             .shadow(shadow, shape, ambientColor = Color(0xB3000000), spotColor = Color(0xCC000000)).clip(shape)
             // Fading with a veil on top, not transparency: a see-through layer would cut off the shadow drawn above the
             // card, so it would vanish while another card is lifted and snap back after.
-            .drawWithContent { drawContent(); if (dim < 1f) drawRect(c.bg.copy(alpha = 1f - dim)) }
+            .drawWithContent { drawContent(); val d = dim(); if (d < 1f) drawRect(c.bg.copy(alpha = 1f - d)) }
+            // The card itself (art, flag, text) is recorded once in its own layer; fading or moving it only replays it.
+            .graphicsLayer()
             .border(2.dp, (if (paper) hue else Color.White).copy(alpha = (if (paper) .7f else .75f) * rim), shape)
             .then(if (paper) Modifier.background(sheet).border(1.dp, hue.copy(alpha = .22f), shape)
             else Modifier.background(Brush.linearGradient(listOf(hue, deep), Offset.Zero, Offset(900f, 1100f)))),
@@ -535,7 +539,10 @@ fun FdWalletStack(
         LaunchedEffect(ids) { if (pending == ids || pending?.toSet() != ids.toSet()) pending = null }
         val base = pending?.takeIf { it.toSet() == ids.toSet() }?.map { id -> docs.first { it.id == id } } ?: docs
         val from = base.indexOfFirst { it.id == dragId }
-        val target = if (from >= 0) (from + (dragDy / stripPx).roundToInt()).coerceIn(0, base.lastIndex) else -1
+        // Which slot the held card is over: the stack recomposes only when that changes, not on every finger move.
+        val target by remember(from, base.size, stripPx) {
+            derivedStateOf { if (from >= 0) (from + (dragDy / stripPx).roundToInt()).coerceIn(0, base.size - 1) else -1 }
+        }
         val order = if (from >= 0 && target != from) base.toMutableList().apply { add(target, removeAt(from)) } else base
         val latestBase by rememberUpdatedState(base)
         val animScope = rememberCoroutineScope()
@@ -652,7 +659,7 @@ fun FdWalletStack(
                                     }
                                 }
                             },
-                        photoFile = owner?.photoFile, character = owner?.avatar, shared = owner?.shared == true, shadeAbove = i > 0 || dragging, dim = dim, shadeStrength = shade,
+                        photoFile = owner?.photoFile, character = owner?.avatar, shared = owner?.shared == true, shadeAbove = i > 0 || dragging, dim = { dim }, shadeStrength = { shade },
                     )
                 }
             }

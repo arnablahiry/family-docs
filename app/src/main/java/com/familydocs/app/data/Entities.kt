@@ -52,14 +52,18 @@ data class GroupEntity(
 /** Another account in a group: their app shares an encrypted index file (Drive "anyone with the link", sealed with the group code). */
 data class Peer(val key: String, val name: String, val index: String, val at: Long = 0L, val err: String? = null,
                 /** Their phone's public key: Common logins are sealed to it (so the group code alone can't open them). */
-                val pub: String? = null) {
+                val pub: String? = null,
+                /** Whether their share lists you, i.e. they've added your invite (null: not read yet / older version). */
+                val sees: Boolean? = null) {
     companion object {
         fun encode(list: List<Peer>): String? = if (list.isEmpty()) null else JSONArray(list.map {
-            JSONObject().put("key", it.key).put("name", it.name).put("index", it.index).put("at", it.at).put("err", it.err ?: JSONObject.NULL).put("pub", it.pub ?: JSONObject.NULL) }).toString()
+            JSONObject().put("key", it.key).put("name", it.name).put("index", it.index).put("at", it.at).put("err", it.err ?: JSONObject.NULL).put("pub", it.pub ?: JSONObject.NULL)
+                .put("sees", it.sees ?: JSONObject.NULL) }).toString()
         fun decode(json: String?): List<Peer> = runCatching {
             val a = JSONArray(json ?: return emptyList())
             (0 until a.length()).map { a.getJSONObject(it).let { o -> Peer(o.getString("key"), o.optString("name"), o.getString("index"), o.optLong("at"),
-                if (o.isNull("err")) null else o.optString("err").ifEmpty { null }, if (o.isNull("pub")) null else o.optString("pub").ifEmpty { null }) } }
+                if (o.isNull("err")) null else o.optString("err").ifEmpty { null }, if (o.isNull("pub")) null else o.optString("pub").ifEmpty { null },
+                if (!o.has("sees") || o.isNull("sees")) null else o.optBoolean("sees")) } }
         }.getOrDefault(emptyList())
     }
 }
@@ -132,10 +136,29 @@ data class DocumentEntity(
 ) {
     /** Every file of the document (front, back, more pages…), in order. */
     val attachments: List<Attachment> get() = listOfNotNull(fileId?.let { Attachment(it, fileMime ?: "image/jpeg") }) + Attachment.decode(moreFiles)
-    val fields: List<DocField> get() = decodeFields(fieldsJson)
+    val fields: List<DocField> get() = DocMemo.fields(fieldsJson)
     /** Whether the card shows its issuing country's flag. */
     val flagShown: Boolean get() = showFlag ?: com.familydocs.app.domain.DocTypes.flagByDefault(name)
-    val issuer: String get() = country ?: com.familydocs.app.domain.Countries.infer(name, fields, rawText)
+    val issuer: String get() = country ?: DocMemo.issuer(name, fieldsJson, rawText) { com.familydocs.app.domain.Countries.infer(name, fields, rawText) }
+}
+
+/**
+ * Remembers decoded fields and worked-out issuing countries: cards, lists and filters ask for them many times a
+ * frame, and parsing the JSON (or scanning the OCR text) each time made long vaults stutter. Same results, worked out once.
+ */
+internal object DocMemo {
+    private class Lru<K, V>(private val max: Int) : LinkedHashMap<K, V>(64, .75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<K, V>?) = size > max
+    }
+    private val fieldMemo = Lru<String, List<DocField>>(800)
+    private val issuerMemo = Lru<Triple<String, String, String>, String>(800)
+
+    fun fields(json: String): List<DocField> = synchronized(fieldMemo) { fieldMemo[json] } ?: decodeFields(json).also { synchronized(fieldMemo) { fieldMemo[json] = it } }
+
+    fun issuer(name: String, json: String, text: String, work: () -> String): String {
+        val k = Triple(name, json, text)
+        return synchronized(issuerMemo) { issuerMemo[k] } ?: work().also { synchronized(issuerMemo) { issuerMemo[k] = it } }
+    }
 }
 
 @Entity(

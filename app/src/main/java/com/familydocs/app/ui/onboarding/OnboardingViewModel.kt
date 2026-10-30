@@ -164,7 +164,10 @@ class OnboardingViewModel(private val c: AppContainer) : ViewModel() {
             c.appLock.unlock(); busy = false; onDone(); return@launch
         }
         // Joining with an invite someone sent: the group is theirs (read from their encrypted share), set up after the account.
-        val invite = if (!editing && groupMode == "join") com.familydocs.app.domain.GroupInvite.find(groupCode) else null
+        val pasted = if (!editing && groupMode == "join") com.familydocs.app.domain.GroupInvite.find(groupCode) else null
+        // A short invite is checked now (it reads the sender's share for the group's name), so a bad one shows here.
+        val invite = pasted?.let { inv -> runCatching { c.share.open(inv) }.getOrElse { e ->
+            errors = errors + ("group" to (e.message ?: "Couldn't open this invite")); busy = false; return@launch } }
         // Joining with a code: the group (and its documents) comes from this Google account's backup.
         if (!editing && groupMode == "join" && invite == null) {
             val s = session

@@ -1,0 +1,24 @@
+# What's new in each release, newest first. Add a "## <version>" section (matching gradle.properties) with each release:
+# the app shows it once after updating, Settings lists it under "Update" before downloading, and CI puts it in the
+# release notes. One "- " line per change, written for the people using the app.
+
+## 0.8.4
+- Joining a group is invite-only now: no join requests with just the code, and no outside server at all.
+- Invites are much shorter (about 70 characters, starting with LR.). Older invites still work.
+- After joining, send your invite back once. Group settings shows who hasn't added you yet.
+- What's new appears on Home once after each update, and Settings lists what's coming before you download an update.
+
+## 0.8.3
+- Passport cards show the country's flag, with the booklet clear of the dates.
+
+## 0.8.2
+- Optional backup password for logins (yours and the Common ones) in Settings › Backup.
+- Common logins in shared groups are sealed to each member's phone.
+
+## 0.8.1
+- Other members' logins are never shown on your phone, not even to admins.
+
+## 0.8.0
+- Logins as cards with View, Copy and Delete, and their own PIN.
+- Smoother page transitions and back gesture; back from search.
+- Multi-page documents resize smoothly between pages.

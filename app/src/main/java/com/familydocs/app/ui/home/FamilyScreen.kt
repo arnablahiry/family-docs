@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -95,15 +96,12 @@ fun FamilyScreen(onMember: (String) -> Unit, onSettings: () -> Unit, onDocument:
     LaunchedEffect(Unit) {
         if (!app.settings.value.peopleCleanupDone) { app.repo.foldLocalPeople(); app.settings.update { it.copy(peopleCleanupDone = true, familyPresetDone = true) } }
     }
-    // Whenever Home comes back to the screen: new members / requests, then publish and read the group's shares.
+    // Whenever Home comes back to the screen: publish and read the group's shares.
     val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
     androidx.compose.runtime.DisposableEffect(lifecycle) {
         val obs = androidx.lifecycle.LifecycleEventObserver { _, e ->
             if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
-                app.appScope.launch {
-                    if (app.requests.enabled) runCatching { app.requests.checkGroups() }
-                    com.familydocs.app.backup.BackupWorker.syncShares(app.appContext)
-                }
+                com.familydocs.app.backup.BackupWorker.syncShares(app.appContext)
             }
         }
         lifecycle.addObserver(obs)
@@ -123,14 +121,6 @@ fun FamilyScreen(onMember: (String) -> Unit, onSettings: () -> Unit, onDocument:
     Column(Modifier.fillMaxSize().background(c.bg).statusBarsPadding()) {
         GroupHeader(groups, gid, onSettings, onCreate = { sheet = "create" }, onJoin = { sheet = "join" },
             onGroupSettings = { id -> settingsFor = Triple(id, null, null) })
-        // Someone asked to join this group with its code: review in Group settings.
-        val incoming by app.requests.incoming.collectAsStateWithLifecycle()
-        gid?.let { incoming[it] }.orEmpty().takeIf { it.isNotEmpty() }?.let { reqs ->
-            FdBanner("people", if (reqs.size == 1) "${reqs[0].name} asked to join" else "${reqs.size} people asked to join",
-                Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 6.dp)) {
-                com.familydocs.app.ui.ds.FdTextButton("Review", { gid?.let { settingsFor = Triple(it, null, null) } })
-            }
-        }
         // Restored on this phone, but the logins are locked with the backup password: ask for it.
         val loginsWaiting by app.loginLock.waiting.collectAsStateWithLifecycle()
         var unlocking by remember { mutableStateOf(false) }
@@ -145,6 +135,9 @@ fun FamilyScreen(onMember: (String) -> Unit, onSettings: () -> Unit, onDocument:
                 FdIconButton("close", { app.share.dismissNotice(n.id) }, size = 32.dp, iconSize = 15.dp, description = "Dismiss")
             }
         }
+        // First time after an update: what changed, until it's closed.
+        val news by app.whatsNew.entries.collectAsStateWithLifecycle()
+        if (news.isNotEmpty()) WhatsNewBox(news, Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 6.dp)) { app.whatsNew.dismiss() }
         // Switching groups: the old page fades back a touch, the new one rises in and settles.
         AnimatedContent(gid, transitionSpec = {
             (fadeIn(tween(280, delayMillis = 90)) + slideInVertically(tween(380, easing = FdEase)) { it / 16 } + scaleIn(tween(380, easing = FdEase), initialScale = .97f)) togetherWith
@@ -173,6 +166,8 @@ private fun GroupHome(g: String?, onMember: (String) -> Unit, onSettings: () -> 
     val docs by remember(g) { app.repo.documentsOf(g) }.collectAsStateWithLifecycle(emptyList())
     val counts by app.repo.documentCounts.collectAsStateWithLifecycle(emptyList())
     val allEvents by remember(g) { app.repo.eventsOf(g) }.collectAsStateWithLifecycle(emptyList())
+    // Card art, flags and photos for this group decoded in the background, so every vault opens smoothly.
+    LaunchedEffect(docs, members) { if (docs.isNotEmpty() || members.isNotEmpty()) com.familydocs.app.ui.components.warmPictures(app, docs, members) }
     var query by rememberSaveable { mutableStateOf("") }
     // Searching: a back arrow in the box (and the back gesture) clears the search and returns to the home page.
     val focus = androidx.compose.ui.platform.LocalFocusManager.current
@@ -182,6 +177,8 @@ private fun GroupHome(g: String?, onMember: (String) -> Unit, onSettings: () -> 
     val self = members.firstOrNull { it.isSelf }
     val events = allEvents.filter { it.visibleTo(self?.id) && Events.isCurrent(it.startDay, it.endDay) }
     val full = GridItemSpan(2)
+    // worked out once per query (not on every recomposition while something animates)
+    val hits = remember(query, members, docs) { if (query.isBlank()) emptyList() else search(query, members, docs) }
 
     LazyVerticalGrid(
         GridCells.Fixed(2), Modifier.fillMaxSize(),
@@ -224,7 +221,6 @@ private fun GroupHome(g: String?, onMember: (String) -> Unit, onSettings: () -> 
         }
 
         if (query.isNotBlank()) {
-            val hits = search(query, members, docs)
             if (hits.isEmpty()) item(span = { full }) { FdEmpty("Nothing matches “$query”.", Modifier.padding(top = 10.dp)) }
             else items(hits, span = { full }) { h ->
                 Row(
@@ -420,5 +416,29 @@ private fun GroupSheet(title: String, text: String, placeholder: String, action:
         com.familydocs.app.ui.ds.FdButton(if (busy) "One moment…" else action, { scope.launch { busy = true; error = onSubmit(value); busy = false; if (error == null) onDismiss() } },
             Modifier.padding(top = 14.dp), enabled = value.isNotBlank() && !busy)
         Spacer(Modifier.height(12.dp))
+    }
+}
+
+/** "What's new in 0.8.4": the changes since the version you had, with ✕. */
+@Composable
+private fun WhatsNewBox(entries: List<com.familydocs.app.domain.Changelog.Entry>, modifier: Modifier = Modifier, onClose: () -> Unit) {
+    val c = Fd.c
+    Column(modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.accentSoft).padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            FdIcon("sparkle", 18.dp)
+            Text("What's new in ${entries.first().version}", style = fdText(13.5f, FontWeight.SemiBold), modifier = Modifier.weight(1f))
+            FdIconButton("close", onClose, size = 32.dp, iconSize = 15.dp, description = "Close")
+        }
+        Column(Modifier.padding(start = 28.dp, end = 10.dp)) {
+            entries.forEach { e ->
+                if (entries.size > 1) Text(e.version, style = fdText(11.5f, FontWeight.SemiBold, c.muted), modifier = Modifier.padding(top = 6.dp))
+                e.notes.forEach { n ->
+                    Row(Modifier.padding(top = 4.dp)) {
+                        Text("•", style = fdText(12.5f, color = c.accent), modifier = Modifier.width(12.dp))
+                        Text(n, style = fdText(12.5f), modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+        }
     }
 }

@@ -259,7 +259,7 @@ fun FdCharacterPicker(selected: String?, onPick: (String) -> Unit, googlePhoto: 
                 }
                 Box(Modifier.align(Alignment.BottomEnd).offset(2.dp, 2.dp).size(20.dp).clip(CircleShape).background(c.surface).border(1.dp, c.line, CircleShape),
                     contentAlignment = Alignment.Center) {
-                    Image(painterResource(com.familydocs.app.R.drawable.ic_google), null, Modifier.size(12.dp))
+                    Image(fdPainter(com.familydocs.app.R.drawable.ic_google), null, Modifier.size(12.dp))
                 }
             }
         }
@@ -267,7 +267,7 @@ fun FdCharacterPicker(selected: String?, onPick: (String) -> Unit, googlePhoto: 
             val on = key == selected
             Box(
                 Modifier.size(58.dp).border(2.5.dp, if (on) c.primary else Color.Transparent, CircleShape).padding(4.dp).clip(CircleShape).clickable { onPick(key) },
-            ) { Image(painterResource(res), "Character", Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
+            ) { Image(fdPainter(res), "Character", Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
         }
     }
 }

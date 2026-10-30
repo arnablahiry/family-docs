@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
@@ -397,9 +398,12 @@ private fun UpdateRow(updater: com.familydocs.app.update.AppUpdater, beforeLeavi
                 if (updater.canInstall()) "Download$mb and install · everything on this phone stays"
                 else "First allow Lararium to install apps (one switch), then tap again",
                 icon = "cloud", onClick = { beforeLeavingApp(); appScope.launch { updater.downloadAndInstall(st.release) } })
+            ReleaseNotes(st.release)
         }
-        is com.familydocs.app.update.AppUpdater.State.Downloading ->
+        is com.familydocs.app.update.AppUpdater.State.Downloading -> {
             FdListItem("Downloading ${st.release.version}…", "${(st.progress * 100).toInt()}% · keeps going in the background (see the notification); the installer opens when it's done", icon = "cloud")
+            ReleaseNotes(st.release)
+        }
         com.familydocs.app.update.AppUpdater.State.Checking -> FdListItem("Checking for updates…", null, icon = "refresh")
         com.familydocs.app.update.AppUpdater.State.UpToDate -> FdListItem("Up to date", "You have the latest version", icon = "check",
             onClick = { scope.launch { updater.check() } }, chevron = false)
@@ -407,5 +411,24 @@ private fun UpdateRow(updater: com.familydocs.app.update.AppUpdater, beforeLeavi
             onClick = { scope.launch { updater.check() } })
         com.familydocs.app.update.AppUpdater.State.Idle -> FdListItem("Check for updates", "Needs an internet connection", icon = "refresh",
             onClick = { scope.launch { updater.check() } })
+    }
+}
+
+/** Under the update: what's coming in it (each version since yours, newest first). */
+@Composable
+private fun ReleaseNotes(r: com.familydocs.app.update.AppUpdater.Release) {
+    if (r.notes.isEmpty()) return
+    val c = Fd.c
+    Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 12.dp)) {
+        Text("What's coming", style = fdText(12f, FontWeight.SemiBold, c.muted))
+        r.notes.forEach { e ->
+            if (r.notes.size > 1) Text(e.version, style = fdText(12f, FontWeight.SemiBold, c.muted), modifier = Modifier.padding(top = 8.dp))
+            e.notes.forEach { n ->
+                Row(Modifier.padding(top = 5.dp)) {
+                    Text("•", style = fdText(13f, color = c.accent), modifier = Modifier.width(14.dp))
+                    Text(n, style = fdText(13f, color = c.fg.copy(alpha = .8f)), modifier = Modifier.weight(1f))
+                }
+            }
+        }
     }
 }

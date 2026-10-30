@@ -84,6 +84,16 @@ private val MOTIFS: Map<String, Int> = mapOf(
     "afmamka" to R.drawable.card_m_tax,
 )
 
+/** The bundled pictures a document's card and list row use (motif, big and small flag), for [ResImages.warm]. */
+@SuppressLint("DiscouragedApi")
+fun cardImageIds(context: android.content.Context, doc: com.familydocs.app.data.DocumentEntity): List<Int> {
+    val key = com.familydocs.app.domain.DocTypes.forName(doc.name).key
+    val code = doc.issuer.lowercase()
+    return listOfNotNull(MOTIFS[key],
+        code.takeIf { it.isNotEmpty() && doc.flagShown }?.let { context.resources.getIdentifier("cflag_$it", "drawable", context.packageName) },
+        code.takeIf { it.isNotEmpty() }?.let { context.resources.getIdentifier("flag_$it", "drawable", context.packageName) })
+}
+
 /** [sky, sky2, hill1, hill2, hill3] for a card type. */
 fun cardPalette(key: String, hue: Long): List<Color> {
     val p = TYPE_PALETTES[key]
@@ -105,7 +115,7 @@ fun CardScene(key: String, hue: Long, country: String?, modifier: Modifier = Mod
     val flagId = remember(key, country) {
         if (!country.isNullOrEmpty()) ctx.resources.getIdentifier("cflag_" + country.lowercase(), "drawable", ctx.packageName) else 0
     }.takeIf { showFlag } ?: 0
-    val flag = if (flagId != 0) painterResource(flagId) else null
+    val flag = if (flagId != 0) fdPainter(flagId) else null
     val tilt = remember(key, country) { flagTilt(key, country.orEmpty().uppercase()) }
     Box(modifier) {
         Canvas(Modifier.fillMaxSize()) {
@@ -127,7 +137,7 @@ fun CardScene(key: String, hue: Long, country: String?, modifier: Modifier = Mod
             drawPath(hill(0, ::X, ::Y), p[2])
         }
         // A passport card has its dates and machine-readable lines lower down: its booklet sits higher and a bit smaller.
-        if (motif != null) Image(painterResource(motif), null, Modifier.fillMaxSize().then(if (key == "passport") Modifier.graphicsLayer {
+        if (motif != null) Image(fdPainter(motif), null, Modifier.fillMaxSize().then(if (key == "passport") Modifier.graphicsLayer {
             transformOrigin = androidx.compose.ui.graphics.TransformOrigin(124f / 160f, 63f / 101f); scaleX = .8f; scaleY = .8f; translationY = -size.height * .08f
         } else Modifier), contentScale = ContentScale.Crop)
         Canvas(Modifier.fillMaxSize()) {

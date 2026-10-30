@@ -23,7 +23,7 @@ class AppLock(private val settings: SettingsStore) : DefaultLifecycleObserver {
     val unlocking: StateFlow<Boolean> = _unlocking.asStateFlow()
 
     fun unlock() { _locked.value = false; _unlocking.value = false }
-    fun lock() { _unlocking.value = false; _locked.value = true }
+    fun lock() { _unlocking.value = false; _locked.value = true; com.familydocs.app.ui.components.VaultImages.clear() }
     fun beginUnlock() { _unlocking.value = true }
 
     fun expectExternalActivity(windowMs: Long = 5 * 60_000) {

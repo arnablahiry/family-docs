@@ -82,7 +82,22 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
             BackupWorker.syncShares(context) // the full share (documents, files) uploads in the background
             quick
         }
-        GroupInvite(g.id, g.name, g.code, g.shareIndex!!, me.id, dao.accountNow()?.name ?: me.name)
+        GroupInvite(g.id, g.code, g.shareIndex!!, g.name, me.id, dao.accountNow()?.name ?: me.name)
+    }
+
+    /**
+     * A short invite carries only the group, its code and where the sender's share is: this reads the share (with the
+     * code) for the group's name and who sent it. Also checks the invite works. Needs a connection.
+     */
+    suspend fun open(inv: GroupInvite): GroupInvite = withContext(Dispatchers.IO) {
+        if (inv.complete) return@withContext inv
+        val sealed = runCatching { DriveClient.publicDownload(inv.index) }
+            .getOrElse { throw IllegalStateException("Couldn't reach the share this invite points to. Check your connection and try again.", it) }
+        val j = runCatching { JSONObject(String(BackupCrypto.open(sealed, key(GroupEntity(inv.groupId, "", inv.code))))) }
+            .getOrElse { throw IllegalStateException("This invite doesn't open. Make sure you pasted all of it, or ask for a new one.", it) }
+        require(j.optString("group") == inv.groupId) { "This invite doesn't match its share. Ask for a new one." }
+        val from = j.getJSONObject("from")
+        inv.copy(name = j.optString("name").ifBlank { "Group" }, from = from.getString("key"), fromName = from.optString("name").ifBlank { "Someone" })
     }
 
     /** A first, tiny share index (just you), link-shared, so an invite exists before the files are uploaded. */
@@ -111,8 +126,9 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
      * Pasted invite: joins the group if it's new on this phone, or adds the sender's share to it (someone sending their
      * link back). Returns the group, and a problem to show if their share couldn't be read yet.
      */
-    suspend fun accept(accessToken: String?, inv: GroupInvite): Pair<GroupEntity, String?> = withContext(Dispatchers.IO) {
+    suspend fun accept(accessToken: String?, invite: GroupInvite): Accepted = withContext(Dispatchers.IO) {
         val me = dao.selfNow() ?: error("No account on this phone")
+        val inv = open(invite)
         require(inv.from != me.id) { "That's your own invite. Send it to the person you want to add." }
         val existing = dao.groupNow(inv.groupId)
         if (existing != null) require(GroupCodes.normalize(existing.code) == GroupCodes.normalize(inv.code)) { "This invite has a different code from your copy of ${existing.name}" }
@@ -131,8 +147,11 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
             err
         }
         if (accessToken == null) BackupWorker.syncShares(context)
-        dao.groupNow(g.id)!! to problem
+        Accepted(dao.groupNow(g.id)!!, problem, inv.fromName, inv.from)
     }
+
+    /** A joined (or updated) group, a problem reading the sender's share if there was one, and who sent the invite. */
+    data class Accepted(val group: GroupEntity, val problem: String?, val fromName: String, val fromKey: String)
 
     /** Stops reading [peerKey]'s share and removes what they shared from this phone. */
     suspend fun forget(groupId: String, peerKey: String) = withContext(Dispatchers.IO) {
@@ -142,9 +161,6 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
     }
 
     // ---------------- publishing ----------------
-
-    /** The group's key (from its code and id): seals the shares, and join-request replies only members can read. */
-    fun groupKey(g: GroupEntity) = key(g)
 
     // The key is slow to derive on purpose (it protects the code), so it's worked out once per group and code.
     private val keyCache = java.util.concurrent.ConcurrentHashMap<String, ByteArray>()
@@ -330,7 +346,8 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
         // Their name may have changed, and they may know members you don't yet (not people an admin just removed).
         val now = dao.groupNow(g.id) ?: grp
         val known = now.peerList.associateBy { it.key }.toMutableMap()
-        known[p.key] = p.copy(name = by, at = System.currentTimeMillis(), err = null, pub = j.optStringOrNull("pub") ?: p.pub)
+        val sees = (0 until (j.optJSONArray("peers")?.length() ?: 0)).any { j.getJSONArray("peers").getJSONObject(it).optString("key") == myKey }
+        known[p.key] = p.copy(name = by, at = System.currentTimeMillis(), err = null, pub = j.optStringOrNull("pub") ?: p.pub, sees = sees)
         val gone = synchronized(prefs) { longMap("handled:${g.id}") }
         j.optJSONArray("peers")?.forEachObj { o -> val pk = o.getString("key")
             if (pk != myKey && pk !in known && System.currentTimeMillis() - (gone[pk] ?: 0L) > REMOVED_QUIET) known[pk] = Peer(pk, o.optString("name"), o.getString("index")) }
@@ -351,9 +368,9 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
         val priv = crypto.readSecret("device_ec_priv")
         if (pub != null && priv != null)
             return pub to java.security.KeyFactory.getInstance("EC").generatePrivate(java.security.spec.PKCS8EncodedKeySpec(priv))
-        val kp = RequestCrypto.newKeys()
+        val kp = PhoneCrypto.newKeys()
         crypto.storeSecret("device_ec_priv", kp.private.encoded)
-        val p = RequestCrypto.b64(kp.public.encoded)
+        val p = PhoneCrypto.b64(kp.public.encoded)
         prefs.edit().putString("device_pub", p).commit()
         return p to kp.private
       }
@@ -373,9 +390,9 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
         if (prefs.getString("loginsig:${g.id}", null) == sig) prefs.getString("logins:${g.id}", null)?.let { return JSONObject(it) }
         val k = ByteArray(32).also { java.security.SecureRandom().nextBytes(it) }
         val env = JSONObject()
-        to.forEach { (key, pub) -> runCatching { RequestCrypto.sealTo(RequestCrypto.b64(k), RequestCrypto.publicOf(pub)) }.getOrNull()
+        to.forEach { (key, pub) -> runCatching { PhoneCrypto.sealTo(PhoneCrypto.b64(k), PhoneCrypto.publicOf(pub)) }.getOrNull()
             ?.let { (epk, box) -> env.put(key, JSONObject().put("epk", epk).put("box", box)) } }
-        val out = JSONObject().put("box", RequestCrypto.b64(BackupCrypto.seal(plain.toByteArray(), k, GroupInvite.salt(g.id)))).put("to", env)
+        val out = JSONObject().put("box", PhoneCrypto.b64(BackupCrypto.seal(plain.toByteArray(), k, GroupInvite.salt(g.id)))).put("to", env)
         prefs.edit().putString("logins:${g.id}", out.toString()).putString("loginsig:${g.id}", sig).apply()
         return out
     }
@@ -383,8 +400,8 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
     /** Opens someone's Common logins with this phone's key; null when they aren't sealed to it (yet). */
     private fun openLogins(l: JSONObject, myKey: String): JSONArray? {
         val e = l.optJSONObject("to")?.optJSONObject(myKey) ?: return null
-        val k = RequestCrypto.unb64(RequestCrypto.openFrom(e.getString("epk"), e.getString("box"), deviceKeys().second))
-        return JSONArray(String(BackupCrypto.open(RequestCrypto.unb64(l.getString("box")), k)))
+        val k = PhoneCrypto.unb64(PhoneCrypto.openFrom(e.getString("epk"), e.getString("box"), deviceKeys().second))
+        return JSONArray(String(BackupCrypto.open(PhoneCrypto.unb64(l.getString("box")), k)))
     }
 
     // ---------------- admins ----------------

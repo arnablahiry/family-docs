@@ -204,7 +204,7 @@ fun RegisterScreen(vm: OnboardingViewModel, onBack: () -> Unit, title: String = 
                        else "Paste the invite someone in the group sent you, or a code from your own Google backup.") {
                 FdSegmented(listOf(Triple("create", "plus", "Create a group"), Triple("join", "key", "Join a group")), vm.groupMode) { vm.groupMode = it }
                 if (vm.groupMode == "create") FdInput(vm.groupName, { vm.groupName = it }, Modifier.padding(top = 10.dp), placeholder = "Group name, e.g. Family")
-                else FdInput(vm.groupCode, { vm.groupCode = it }, Modifier.padding(top = 10.dp), placeholder = "Invite (FD1.…) or group code",
+                else FdInput(vm.groupCode, { vm.groupCode = it }, Modifier.padding(top = 10.dp), placeholder = "Invite (LR.…) or group code",
                     singleLine = false)
             }
 

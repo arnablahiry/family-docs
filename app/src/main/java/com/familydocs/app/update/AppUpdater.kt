@@ -23,7 +23,9 @@ import java.net.URL
  * The first time, Android asks once to allow "Install unknown apps" for Lararium.
  */
 class AppUpdater(private val context: Context) {
-    data class Release(val version: String, val tag: String, val apkUrl: String, val bytes: Long)
+    /** [notes]: what changes between the installed version and this one, newest first. */
+    data class Release(val version: String, val tag: String, val apkUrl: String, val bytes: Long,
+                       val notes: List<com.familydocs.app.domain.Changelog.Entry> = emptyList())
 
     sealed interface State {
         data object Idle : State
@@ -150,7 +152,23 @@ class AppUpdater(private val context: Context) {
         val version = VERSION.find(tag)?.value ?: return null
         val assets = j.getJSONArray("assets")
         val apk = (0 until assets.length()).map { assets.getJSONObject(it) }.firstOrNull { it.getString("name").endsWith(".apk") } ?: return null
-        return Release(version, tag, apk.getString("browser_download_url"), apk.optLong("size"))
+        return Release(version, tag, apk.getString("browser_download_url"), apk.optLong("size"), notes(tag, version, j.optString("body")))
+    }
+
+    /**
+     * What's coming: the changelog as it is in that release (every version since yours), or else the release's own
+     * "- " lines. Empty if neither can be read.
+     */
+    private fun notes(tag: String, version: String, body: String): List<com.familydocs.app.domain.Changelog.Entry> {
+        val log = runCatching {
+            val c = (URL("https://raw.githubusercontent.com/$REPO/$tag/app/src/main/assets/changelog.txt").openConnection() as HttpURLConnection)
+                .apply { connectTimeout = 10_000; readTimeout = 15_000 }
+            if (c.responseCode == 200) com.familydocs.app.domain.Changelog.parse(c.inputStream.bufferedReader().use { it.readText() }) else emptyList()
+        }.getOrDefault(emptyList())
+        val since = com.familydocs.app.domain.Changelog.between(log, currentVersion, version)
+        if (since.isNotEmpty()) return since
+        val lines = body.lines().map { it.trim() }.filter { it.startsWith("- ") }.map { it.removePrefix("- ").trim() }
+        return if (lines.isEmpty()) emptyList() else listOf(com.familydocs.app.domain.Changelog.Entry(version, lines))
     }
 
     companion object {

@@ -105,29 +105,10 @@ fun GroupSettingsSheet(groupId: String, intro: String? = null, joinedFrom: Strin
     var removing by remember { mutableStateOf<String?>(null) }
     var croppingFor by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
     val sendInvite = rememberInviteSender { busy = if (it) "Preparing the invite…" else null }
-    // Requests to join with the code (when the app was built with the request server)
-    val incoming by app.requests.incoming.collectAsStateWithLifecycle()
-    val waiting = incoming[g.id].orEmpty()
-    var approving by remember { mutableStateOf<com.familydocs.app.backup.JoinRequests.Incoming?>(null) }
-    androidx.compose.runtime.LaunchedEffect(g.id) { if (app.requests.enabled) runCatching { app.requests.checkGroups() } }
-    val approve = rememberGoogleConnect { r ->
-        val req = approving ?: return@rememberGoogleConnect
-        r.onSuccess { s ->
-            scope.launch {
-                busy = "Letting ${req.name} in…"
-                runCatching { app.requests.approve(s.token, g, req) }
-                    .onSuccess { toast.show("${req.name} can join now. Their documents appear once their phone confirms.") }
-                    .onFailure { toast.show("Couldn't approve: ${it.message}") }
-                busy = null; approving = null
-            }
-        }.onFailure { approving = null; if (it !is GoogleAccountHelper.Cancelled) toast.show(GoogleAccountHelper.explain(it)) }
-    }
     val sync = rememberGoogleConnect { r ->
         r.onSuccess { s ->
             scope.launch {
                 busy = "Syncing…"
-                // new members (and requests) first, then publish yours and read everyone's
-                if (app.requests.enabled) { busy = "Checking for new members…"; runCatching { app.requests.checkGroups() } }
                 runCatching { app.share.sync(s.token, g.id) { msg -> busy = msg } }.onSuccess { toast.show(it) }.onFailure { toast.show("Couldn't sync: ${it.message}") }
                 busy = null
             }
@@ -166,8 +147,10 @@ fun GroupSettingsSheet(groupId: String, intro: String? = null, joinedFrom: Strin
                 "created" -> FdBanner("info", "Backups: by default your Drive keeps you and this group's Common vault; you can switch to the whole group below, any time. " +
                     "To share the group with someone, tap Invite: your phone puts an encrypted copy in your Google Drive (allow Drive access when Google asks) and each person who joins does the same.",
                     Modifier.padding(bottom = 14.dp))
-                "joined" -> FdBanner("people", "You joined ${g.name}. Your documents are shared back with ${joinedFrom ?: "the person who invited you"} and the rest of the group " +
-                    "automatically (Google asks you to allow Drive access the first time).", Modifier.padding(bottom = 14.dp))
+                "joined" -> FdBanner("people", "You joined ${g.name}. Last step: send your own invite back to ${joinedFrom ?: "the person who invited you"}, so your documents " +
+                    "show up on their phone (and, through theirs, everyone else's). Google asks you to allow Drive access the first time.", Modifier.padding(bottom = 14.dp)) {
+                    com.familydocs.app.ui.ds.FdTextButton("Send", { sendInvite(g.id) }, enabled = busy == null)
+                }
             }
 
             // ---- backup ----
@@ -179,26 +162,6 @@ fun GroupSettingsSheet(groupId: String, intro: String? = null, joinedFrom: Strin
                  else "Your documents and the Common vault (with its logins). The others back up their own from their phones.",
                 style = fdText(12.5f, color = c.muted), modifier = Modifier.padding(top = 8.dp, bottom = 18.dp))
 
-            // ---- requests ----
-            if (waiting.isNotEmpty()) {
-                Label("Asking to join")
-                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).border(1.dp, c.line, RoundedCornerShape(16.dp)).padding(vertical = 2.dp)) {
-                    waiting.forEach { r ->
-                        Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 8.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Column(Modifier.weight(1f)) {
-                                Text(r.name, style = fdText(14.5f, FontWeight.Medium))
-                                Text(if (r.at > 0) "Asked " + android.text.format.DateUtils.getRelativeTimeSpanString(r.at) else "Asked with the group code", style = fdText(12f, color = c.muted))
-                            }
-                            com.familydocs.app.ui.ds.FdTextButton("Decline", { scope.launch { runCatching { app.requests.decline(g, r) }.onFailure { toast.show("Couldn't decline: ${it.message}") } } },
-                                enabled = busy == null, color = c.muted)
-                            com.familydocs.app.ui.ds.FdTextButton("Approve", { approving = r; approve() }, enabled = busy == null)
-                        }
-                    }
-                }
-                Spacer(Modifier.height(18.dp))
-            }
-
             // ---- people: Common, you, and everyone who shares with you (tap one to open their vault) ----
             Label("People")
             val groupMembers by remember(g.id) { app.repo.membersOf(g.id) }.collectAsStateWithLifecycle(emptyList())
@@ -207,6 +170,7 @@ fun GroupSettingsSheet(groupId: String, intro: String? = null, joinedFrom: Strin
             fun role(key: String?) = when { key == null -> null; key == g.creator -> "Admin · made the group"; key in g.adminKeys -> "Admin"; else -> null }
             fun open(id: String): (() -> Unit)? = onMember?.let { f -> { onDismiss(); f(id) } }
             val peers = g.peerList
+            val unseen = if (peers.isNotEmpty() && peers.all { it.sees == false }) peers else emptyList()
             if (peers.isNotEmpty()) {
                 val adminNames = g.adminKeys.mapNotNull { k -> if (k == self?.id) "you" else peers.firstOrNull { it.key == k }?.name }
                 Text(when {
@@ -226,7 +190,8 @@ fun GroupSettingsSheet(groupId: String, intro: String? = null, joinedFrom: Strin
                 peers.forEach { p ->
                     val m = groupMembers.firstOrNull { it.origin == p.key && !it.shared }
                     PersonRow(p.name.ifBlank { m?.name ?: "Group member" }, m, listOfNotNull(role(p.key), docs(m?.id)).joinToString(" · "),
-                        status = if (p.at == 0L) "Not read yet" else "Updated " + android.text.format.DateUtils.getRelativeTimeSpanString(p.at),
+                        status = (if (p.at == 0L) "Not read yet" else "Updated " + android.text.format.DateUtils.getRelativeTimeSpanString(p.at)) +
+                            if (unseen.isNotEmpty()) " · hasn't added you yet" else "",
                         error = p.err?.let { "Last sync: $it" }, first = first, onClick = m?.let { open(it.id) }) {
                         when {
                             iAdmin && p.key != g.creator -> FdIconButton("sliders", { managing = p.key }, size = 36.dp, iconSize = 17.dp, tint = c.muted, description = "Manage ${p.name}")
@@ -236,8 +201,13 @@ fun GroupSettingsSheet(groupId: String, intro: String? = null, joinedFrom: Strin
                     first = false
                 }
             }
-            if (peers.isEmpty()) Text("No one else yet. Invite the others, or share the code: they can ask to join and you approve. Their documents come back automatically.",
+            if (peers.isEmpty()) Text("No one else yet. Tap Invite and send the invite privately (WhatsApp, Messages…); they paste it in Join group and send theirs back.",
                 style = fdText(13f, color = c.muted), modifier = Modifier.padding(top = 10.dp))
+            // No one has added your invite yet: until someone does, your things reach no one (once one member has you,
+            // the others find you through their share).
+            if (unseen.isNotEmpty() && intro != "joined") FdBanner("people",
+                "${unseen.joinToString(", ") { it.name.ifBlank { "Someone" } }} ${if (unseen.size == 1) "hasn't" else "haven't"} added you yet. Send your invite so your documents show up for them too.",
+                Modifier.padding(top = 10.dp)) { com.familydocs.app.ui.ds.FdTextButton("Send", { sendInvite(g.id) }, enabled = busy == null) }
             Spacer(Modifier.height(12.dp))
             FdButton("Invite someone", { sendInvite(g.id) }, icon = "people", enabled = busy == null)
             Spacer(Modifier.height(10.dp))
@@ -273,7 +243,7 @@ fun GroupSettingsSheet(groupId: String, intro: String? = null, joinedFrom: Strin
         val name = g.peerList.firstOrNull { it.key == key }?.name ?: "them"
         com.familydocs.app.ui.ds.FdConfirmSheet("Remove $name from ${g.name}?",
             "$name's documents disappear from everyone's phone and they no longer see ${g.name}'s things; their phone tells them you removed them. " +
-                "Nothing is deleted from their own phone or Drive, and they can ask to join again with the code.",
+                "Nothing is deleted from their own phone or Drive, and you can invite them again later.",
             "Remove", onConfirm = { scope.launch {
                 runCatching { app.share.removeMember(g.id, key) }.onSuccess { toast.show("$name was removed from ${g.name}") }.onFailure { toast.show(it.message ?: "Couldn't remove") }
                 removing = null
@@ -312,8 +282,7 @@ private fun Label(text: String) {
 
 
 /**
- * Join a group: paste an invite, or type a code. A code for a group that isn't on this phone can ask the group's members
- * for access (when the app was built with the request server); they approve in their app and you join automatically.
+ * Join a group: paste the invite someone in it sent you. (A group's code alone opens a group that's already on this phone.)
  */
 @Composable
 fun JoinGroupSheet(onJoined: (groupId: String, invitedBy: String?) -> Unit, onDismiss: () -> Unit) {
@@ -323,58 +292,24 @@ fun JoinGroupSheet(onJoined: (groupId: String, invitedBy: String?) -> Unit, onDi
     var text by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
-    var found by remember { mutableStateOf<String?>(null) }   // name of the group the code belongs to
-    var sent by remember { mutableStateOf(false) }
     FdSheet(onDismiss) {
-        SheetTitle("Join a group", if (app.requests.enabled) "Paste the invite someone sent you, or enter the group's code to ask its members for access."
-            else "Paste the invite someone in the group sent you. (A code alone opens groups that are already on this phone.)")
-        if (sent) {
-            FdBanner("check", "Request sent to ${found}. Everyone in it gets a notification; as soon as someone approves, you join automatically and get a notification too.")
-            Spacer(Modifier.height(14.dp))
-            FdButton("Done", onDismiss)
-            Spacer(Modifier.height(12.dp))
-            return@FdSheet
-        }
-        FdInput(text, { text = it; error = null; found = null }, placeholder = "Invite (FD1.…) or group code, e.g. K7#-Q2@-XM4", singleLine = false, error = error != null)
+        SheetTitle("Join a group", "Paste the invite someone in the group sent you (it starts with LR.). Then send yours back to them, so they see you too.")
+        FdInput(text, { text = it; error = null }, placeholder = "LR.…", singleLine = false, error = error != null)
         error?.let { Text(it, style = fdText(12.5f, color = c.danger), modifier = Modifier.padding(top = 8.dp)) }
-        val f = found
-        if (f != null) {
-            Row(Modifier.padding(top = 12.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp)).border(1.dp, c.line, RoundedCornerShape(16.dp)).padding(14.dp),
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                FdIcon("people", 20.dp, tint = c.accent)
-                Column(Modifier.weight(1f)) {
-                    Text(f, style = fdText(15f, FontWeight.SemiBold))
-                    Text("Its members decide whether to let you in", style = fdText(12f, color = c.muted))
-                }
-            }
-            FdButton(if (busy) "Sending…" else "Request access", {
-                scope.launch {
-                    busy = true
-                    runCatching { app.requests.request(text, f, app.repo.accountNow()?.name ?: "Someone") }
-                        .onSuccess { sent = true; com.familydocs.app.backup.BackupWorker.scheduleChecks(app.appContext) }
-                        .onFailure { error = "Couldn't send the request: ${it.message}" }
-                    busy = false
-                }
-            }, Modifier.padding(top = 12.dp), enabled = !busy)
-        } else FdButton(if (busy) "One moment…" else "Join", {
+        FdButton(if (busy) "Opening the invite…" else "Join", {
             scope.launch {
                 busy = true
                 val inv = GroupInvite.find(text)
                 if (inv != null) {
-                    runCatching { app.share.accept(null, inv) }.onSuccess { (g, _) ->
-                        // publishes your share and sends it back to the group (needs Drive, done in the background)
+                    runCatching { app.share.accept(null, inv) }.onSuccess { r ->
+                        // publishes your share in the background (needs Drive)
                         com.familydocs.app.backup.BackupWorker.syncShares(app.appContext)
-                        onJoined(g.id, inv.fromName); onDismiss()
+                        onJoined(r.group.id, r.fromName); onDismiss()
                     }.onFailure { error = it.message ?: "Couldn't use that invite" }
                 } else {
                     val local = app.repo.groupByCode(text)
-                    when {
-                        local != null -> { onJoined(local.id, null); onDismiss() }
-                        app.requests.enabled -> runCatching { app.requests.find(text) }
-                            .onSuccess { name -> if (name != null) found = name else error = "No group with this code. Check it with someone in the group, or ask them for an invite." }
-                            .onFailure { error = "Couldn't look up the code: ${it.message}" }
-                        else -> error = "No group with this code on this phone. To join someone else's group, ask them for an invite (Group settings › Invite someone) and paste the whole message here."
-                    }
+                    if (local != null) { onJoined(local.id, null); onDismiss() }
+                    else error = "That isn't an invite. Ask someone in the group for one (Group settings › Invite someone) and paste all of it here."
                 }
                 busy = false
             }
@@ -390,7 +325,7 @@ fun GroupPic(g: com.familydocs.app.data.GroupEntity, size: androidx.compose.ui.u
     val photo = com.familydocs.app.ui.components.rememberVaultImage(g.photoFile, 600)
     val m = modifier.size(size).clip(androidx.compose.foundation.shape.CircleShape)
     if (photo != null) androidx.compose.foundation.Image(photo, description, m, contentScale = androidx.compose.ui.layout.ContentScale.Crop)
-    else androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(groupArt(g.pic)), description, m, contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+    else androidx.compose.foundation.Image(com.familydocs.app.ui.ds.fdPainter(groupArt(g.pic)), description, m, contentScale = androidx.compose.ui.layout.ContentScale.Crop)
 }
 
 @Suppress("UNUSED_PARAMETER")
@@ -413,7 +348,7 @@ fun GroupPicPicker(selected: String, photo: androidx.compose.ui.graphics.ImageBi
             }
         }
         item(selected != "photo", "Illustration", { onTemplate(com.familydocs.app.domain.GroupPics.DEFAULT) }) {
-            androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(groupArt(null)), "Illustration", Modifier.fillMaxSize().clip(androidx.compose.foundation.shape.CircleShape),
+            androidx.compose.foundation.Image(com.familydocs.app.ui.ds.fdPainter(groupArt(null)), "Illustration", Modifier.fillMaxSize().clip(androidx.compose.foundation.shape.CircleShape),
                 contentScale = androidx.compose.ui.layout.ContentScale.Crop)
         }
         item(selected == "photo", if (photo != null) "Your photo" else "Add photo", {

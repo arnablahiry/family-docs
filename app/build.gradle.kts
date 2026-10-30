@@ -19,10 +19,6 @@ android {
         // Every release must have a higher versionCode than the last one installed, or Android refuses the update.
         versionCode = (project.findProperty("familydocs.versionCode") as String?)?.toInt() ?: 1
         versionName = (project.findProperty("familydocs.versionName") as String?) ?: "0.1.0"
-        // Join requests (optional): a free Firebase project used as a sealed mailbox. Empty = the feature is hidden.
-        // CI passes them from the FIREBASE_API_KEY / FIREBASE_PROJECT_ID repository secrets.
-        buildConfigField("String", "FIREBASE_API_KEY", "\"${(project.findProperty("lararium.firebaseApiKey") as String?).orEmpty()}\"")
-        buildConfigField("String", "FIREBASE_PROJECT", "\"${(project.findProperty("lararium.firebaseProject") as String?).orEmpty()}\"")
     }
 
     // Updates only install over the existing app (keeping all data) when they're signed with the SAME key.

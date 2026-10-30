@@ -53,43 +53,13 @@ That's all. The app doesn't need rebuilding afterwards. Google matches the insta
 
 **Signing in on a new phone:** *I already have an account → Continue with Google*. The backup key lives in that Google account's hidden Drive app folder (`drive.appdata`, invisible in My Drive and readable only by Lararium), so no backup password is needed. Trade-off: anyone who can sign in to that Google account *and* install this app could restore the vault, so keep 2-step verification on for the Google account.
 
-## Join requests (asking to join a group with just its code)
+## Joining a group
 
-Optional. Without it, people join with an invite (Group settings › Invite someone). With it, someone can type a group's
-code in **Join group › Request access**; every member's phone is notified, and any member approves in Group settings.
-
-It uses a free Firebase project as a sealed mailbox (Firestore + anonymous sign-in, Spark plan, no billing). Nothing
-readable is stored there: the group is found by a hash of its code, names are sealed with the code, and the approval
-(the invite) is sealed to the requester's own key, so even someone else with the code can't read it.
-
-1. [console.firebase.google.com](https://console.firebase.google.com) → **Add project** (e.g. `lararium`). Google Analytics: off.
-2. **Build › Authentication › Get started › Sign-in method › Anonymous → Enable**.
-3. **Build › Firestore Database › Create database** (production mode, a location near you).
-4. Firestore › **Rules** → replace everything with the rules below → **Publish**.
-5. Project settings (⚙) → **General**: copy the **Project ID** and the **Web API key**.
-6. GitHub › the repo › Settings › Secrets and variables › Actions → add `FIREBASE_PROJECT_ID` and `FIREBASE_API_KEY`.
-   The next build turns the feature on. (Locally: `lararium.firebaseProject=…` / `lararium.firebaseApiKey=…` in `~/.gradle/gradle.properties`.)
-
-```
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /groups/{lookup} {
-      allow get: if request.auth != null;
-      allow create, update: if request.auth != null && request.resource.data.keys().hasOnly(['n']);
-      match /requests/{id} {
-        allow get, list: if request.auth != null;
-        allow create: if request.auth != null
-          && request.resource.data.keys().hasOnly(['pub', 'who', 'at', 'uid'])
-          && request.resource.data.uid == request.auth.uid;
-        allow update: if request.auth != null
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ok', 'no', 'epk', 'box', 'by', 'back']);
-        allow delete: if request.auth != null && resource.data.uid == request.auth.uid;
-      }
-    }
-  }
-}
-```
+No server: each phone keeps its encrypted share in its own Google Drive. **Group settings › Invite someone** makes a
+short invite (`LR.…`, about 70 characters: the group's id and code, and where your share is). The other person pastes it
+in **Join group**, then sends theirs back the same way; from then on everyone in the group finds everyone else through
+each other's shares. Send invites privately: whoever has one can read the group's shares (Common logins excepted, they're
+sealed to each member's phone).
 
 ## Font (Abaddon)
 
@@ -120,6 +90,6 @@ Android's own cloud backup is switched off (`allowBackup=false` plus data-extrac
 - **Common vault sharing:** each phone has its own vault today, so "everyone can see and edit" only becomes true across phones once there's a sync layer. The planned design is a Drive folder shared with each family member's Google account, holding the Common vault encrypted with a family key. That way each person's own documents stay private. It isn't built yet.
 
 - This was written without an Android SDK, so it has **not been compiled as an app yet**. The OCR parser and backup crypto *were* compiled and tested. Expect a small fix or two on the first Gradle sync, and send me the error text if anything doesn't build.
-- Phone number isn't SMS-verified. That needs Firebase Auth, which is easy to add if you want it.
+- Phone number isn't SMS-verified.
 - OCR uses ML Kit's Latin model. Hindi text is ignored, but the English lines on Aadhaar/PAN carry everything the parser needs.
 - The camera shot is written to app cache for a moment, then deleted right after it's read and encrypted.

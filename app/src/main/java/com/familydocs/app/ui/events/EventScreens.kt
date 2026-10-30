@@ -394,7 +394,7 @@ fun EditEventScreen(eventId: String?, onBack: () -> Unit, onSaved: (id: String, 
                         val on = !hasPhoto && key == art
                         Box(Modifier.size(58.dp).border(2.5.dp, if (on) c.primary else androidx.compose.ui.graphics.Color.Transparent, CircleShape).padding(4.dp).clip(CircleShape)
                             .tap { art = key; artTouched = true; photo = null; removePhoto = true }) {
-                            Image(painterResource(res), label, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                            Image(com.familydocs.app.ui.ds.fdPainter(res), label, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                         }
                     }
                 }

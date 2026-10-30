@@ -12,29 +12,16 @@ import java.security.spec.X509EncodedKeySpec
 import javax.crypto.KeyAgreement
 
 /**
- * Crypto for join requests (pure JVM, unit-tested). Nothing readable is stored on the request server:
- *  - a group is found by [lookup] (a hash of its code) and its name is sealed with [codeKey], so only someone who
- *    already has the code can see which group it is;
- *  - the requester's name is sealed with [codeKey] too (members have the code);
- *  - the approval (the invite, with the share's Drive id) is sealed to the requester's own public key ([sealTo]),
- *    so another person who also knows the code can't read it.
+ * Each phone's key pair (P-256) and sealing to it (pure JVM, unit-tested): the Common logins in a group share are
+ * sealed to every member's phone key, so the group code alone can't open them.
  */
-object RequestCrypto {
-    private fun sha(s: String) = MessageDigest.getInstance("SHA-256").digest(s.toByteArray())
-    private fun hex(b: ByteArray) = b.joinToString("") { "%02x".format(it) }
+object PhoneCrypto {
     fun b64(b: ByteArray): String = java.util.Base64.getEncoder().encodeToString(b)
     fun unb64(s: String): ByteArray = java.util.Base64.getDecoder().decode(s)
 
-    /** Where the group lives on the request server: the same for everyone with the code, and says nothing about it. */
-    fun lookup(normalizedCode: String): String = hex(sha("lararium-lookup:$normalizedCode")).take(40)
+    private fun sealText(text: String, key: ByteArray): String = b64(BackupCrypto.seal(text.toByteArray(), key, ByteArray(16)))
+    private fun openText(sealed: String, key: ByteArray): String = String(BackupCrypto.open(unb64(sealed), key))
 
-    private fun codeSalt(normalizedCode: String) = sha("lararium-code-salt:$normalizedCode").copyOf(16)
-    fun codeKey(normalizedCode: String): ByteArray = BackupCrypto.deriveKey(normalizedCode.toCharArray(), codeSalt(normalizedCode))
-
-    fun sealText(text: String, key: ByteArray): String = b64(BackupCrypto.seal(text.toByteArray(), key, ByteArray(16)))
-    fun openText(sealed: String, key: ByteArray): String = String(BackupCrypto.open(unb64(sealed), key))
-
-    // ---- requester's key pair (P-256) ----
     fun newKeys(): KeyPair = KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1")) }.generateKeyPair()
     fun publicOf(b64: String): PublicKey = KeyFactory.getInstance("EC").generatePublic(X509EncodedKeySpec(unb64(b64)))
     fun privateOf(b64: String): PrivateKey = KeyFactory.getInstance("EC").generatePrivate(PKCS8EncodedKeySpec(unb64(b64)))
