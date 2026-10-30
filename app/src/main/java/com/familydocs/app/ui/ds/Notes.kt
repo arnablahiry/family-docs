@@ -28,6 +28,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.ui.input.pointer.pointerInput
@@ -153,7 +155,7 @@ fun FdNotesField(value: String, onValueChange: (String) -> Unit, modifier: Modif
     // doesn't also leave the page.
     androidx.activity.compose.BackHandler(enabled = focused) { focusManager.clearFocus() }
     @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
-    val ime = androidx.compose.foundation.layout.WindowInsets.isImeVisible
+    val ime = WindowInsets.isImeVisible
     var hadKeyboard by remember { mutableStateOf(false) }
     LaunchedEffect(focused, ime) {
         when {
