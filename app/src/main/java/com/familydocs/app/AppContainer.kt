@@ -24,7 +24,8 @@ class AppContainer(context: Context) {
     val repo: VaultRepository by lazy {
         // Any change to the vault: back up to Drive / update shared groups a couple of minutes later.
         VaultRepository(db.dao(), files).also { r ->
-            r.onChanged = { BackupWorker.soon(app) } // (it checks whether backup or group sharing is on)
+            // (both check whether backup or group sharing is on): the share goes out within seconds, the backup ~2 min later
+            r.onChanged = { BackupWorker.shareNow(app); BackupWorker.soon(app) }
             r.admin = { share } // a group admin's changes to other members' things
             r.groupId.value = settings.value.currentGroup
         }

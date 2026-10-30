@@ -195,8 +195,21 @@ private fun GroupHome(g: String?, onMember: (String) -> Unit, onSettings: () -> 
     // worked out once per query (not on every recomposition while something animates)
     val hits = remember(query, members, docs) { if (query.isBlank()) emptyList() else search(query, members, docs) }
 
+    // "Made with ♥" sits at the very bottom of the screen even when there's little above it: a spacer before it takes
+    // up whatever room is left (none once the page is longer than the screen).
+    val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+    var footerGap by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    val searchingNow by androidx.compose.runtime.rememberUpdatedState(searching)
+    LaunchedEffect(gridState) {
+        androidx.compose.runtime.snapshotFlow { gridState.layoutInfo }.collect { info ->
+            if (searchingNow) return@collect // (search results have no footer)
+            val last = info.visibleItemsInfo.lastOrNull() ?: return@collect
+            footerGap = if (last.index != info.totalItemsCount - 1) 0
+                else (footerGap + info.viewportEndOffset - info.afterContentPadding - (last.offset.y + last.size.height)).coerceAtLeast(0)
+        }
+    }
     LazyVerticalGrid(
-        GridCells.Fixed(2), Modifier.fillMaxSize(),
+        GridCells.Fixed(2), Modifier.fillMaxSize(), state = gridState,
         contentPadding = PaddingValues(bottom = 36.dp), horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item(span = { full }) {
@@ -262,6 +275,7 @@ private fun GroupHome(g: String?, onMember: (String) -> Unit, onSettings: () -> 
             }
             // The + is for events now; adding family members lives in Settings › Family.
             item(span = { full }) { EventsStrip(events, onEvent, onNewEvent) }
+            item(span = { full }) { Spacer(Modifier.height(with(androidx.compose.ui.platform.LocalDensity.current) { footerGap.toDp() })) }
             item(span = { full }) { com.familydocs.app.ui.ds.FdMadeWith(Modifier.padding(top = 30.dp, bottom = 6.dp)) }
         }
     }
@@ -482,7 +496,7 @@ private fun SyncBox(g: com.familydocs.app.data.GroupEntity, waiting: List<com.fa
 
 /**
  * Who in [g] you're not synced with yet and why, with your link to send them (tapping it on their phone adds you).
- * "−" (or a swipe down) minimises it to the box on Home; once everyone's synced it says so.
+ * A swipe down or a tap outside minimises it to the box on Home; once everyone's synced it says so.
  */
 @Composable
 private fun SyncSheet(g: com.familydocs.app.data.GroupEntity, onMinimise: () -> Unit) {
@@ -496,12 +510,9 @@ private fun SyncSheet(g: com.familydocs.app.data.GroupEntity, onMinimise: () -> 
     LaunchedEffect(g.id) { com.familydocs.app.backup.BackupWorker.syncShares(app.appContext) }
     val names = com.familydocs.app.data.Peer.names(waiting.map { it.name.ifBlank { "someone" } })
     com.familydocs.app.ui.ds.FdSheet(onMinimise) {
-        Row(verticalAlignment = Alignment.Top) {
-            Column(Modifier.weight(1f).padding(bottom = 12.dp)) {
-                Text(if (waiting.isEmpty()) "You're synced with everyone" else "Not synced with $names yet", style = fdText(18f, FontWeight.Bold))
-                Text("in ${g.name}", style = fdText(13f, color = c.muted), modifier = Modifier.padding(top = 2.dp))
-            }
-            FdIconButton("minus", onMinimise, size = 36.dp, iconSize = 18.dp, tint = c.muted, description = "Minimise")
+        Column(Modifier.padding(bottom = 12.dp)) {
+            Text(if (waiting.isEmpty()) "You're synced with everyone" else "Not synced with $names yet", style = fdText(18f, FontWeight.Bold))
+            Text("in ${g.name}", style = fdText(13f, color = c.muted), modifier = Modifier.padding(top = 2.dp))
         }
         if (waiting.isEmpty()) {
             FdBanner("check", "Everyone in ${g.name} sees your documents, and you see theirs.")

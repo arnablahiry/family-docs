@@ -38,12 +38,13 @@ class BackupWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
         private const val NAME = "familydocs-drive-backup"
         private const val SHARE_ONLY = "share_only"
 
-        /** Every few hours: shared groups (only does anything when one is shared). */
+        /** In the background, every 15 minutes (Android's shortest): shared groups (only does anything when one is shared). */
         fun scheduleChecks(context: Context) {
-            val req = PeriodicWorkRequestBuilder<BackupWorker>(3, TimeUnit.HOURS)
+            val req = PeriodicWorkRequestBuilder<BackupWorker>(15, TimeUnit.MINUTES)
                 .setInputData(androidx.work.workDataOf(SHARE_ONLY to true))
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build()
-            WorkManager.getInstance(context).enqueueUniquePeriodicWork("$NAME-checks", ExistingPeriodicWorkPolicy.KEEP, req)
+            // UPDATE: phones that had the old 3-hour schedule move onto this one
+            WorkManager.getInstance(context).enqueueUniquePeriodicWork("$NAME-checks", ExistingPeriodicWorkPolicy.UPDATE, req)
         }
 
         /** At app start: read what the other members of shared groups changed (and publish yours). */
@@ -64,6 +65,18 @@ class BackupWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
          * After a change: one backup ~2 minutes later. Each new change restarts the wait, so adding several
          * documents in a row ends in a single backup.
          */
+        /**
+         * Right after a change: your group share goes out a few seconds later (a burst of edits, like typing notes,
+         * ends in one upload), and the others' shares are read at the same time. The full backup still waits ~2 min.
+         */
+        fun shareNow(context: Context) {
+            val req = androidx.work.OneTimeWorkRequestBuilder<BackupWorker>()
+                .setInitialDelay(4, TimeUnit.SECONDS)
+                .setInputData(androidx.work.workDataOf(SHARE_ONLY to true))
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build()
+            WorkManager.getInstance(context).enqueueUniqueWork("$NAME-share-now", androidx.work.ExistingWorkPolicy.REPLACE, req)
+        }
+
         fun soon(context: Context) {
             val req = androidx.work.OneTimeWorkRequestBuilder<BackupWorker>()
                 .setInitialDelay(2, TimeUnit.MINUTES)
