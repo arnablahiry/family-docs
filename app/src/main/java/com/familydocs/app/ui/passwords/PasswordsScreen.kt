@@ -77,7 +77,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.security.SecureRandom
 
 /** After the passwords PIN, seeing or copying more logins on this screen doesn't ask again for this long. */
 private const val UNLOCKED_MS = 60_000L
@@ -151,9 +150,7 @@ fun PasswordsScreen(memberId: String, onBack: () -> Unit) {
                 FdField("Website or app") { FdInput(site, { site = it }, placeholder = "e.g. DigiLocker") }
                 FdField("Username or phone") { FdInput(user, { user = it }) }
                 FdField("Password") {
-                    FdInput(pass, { pass = it }, mono = true, trailing = {
-                        FdIconButton("dice", { pass = generatePassword() }, size = 36.dp, iconSize = 19.dp, tint = c.muted, description = "Generate password")
-                    })
+                    FdInput(pass, { pass = it }, mono = true)
                 }
                 FdButton("Save login", {
                     if (site.isBlank()) { toast.show("Add the website or app name"); return@FdButton }
@@ -204,7 +201,8 @@ private fun PwCard(p: PasswordEntity, selected: Boolean, show: Boolean, onTap: (
     val border by animateColorAsState(if (selected) c.primary else c.line, tween(220), label = "pwBorder")
     val bg by animateColorAsState(if (selected) c.surface2 else c.surface, tween(220), label = "pwBg")
     Column(
-        Modifier.fillMaxWidth().animateContentSize(spring(dampingRatio = .86f, stiffness = Spring.StiffnessMediumLow))
+        // (the keys' row grows the card by itself: one animation, so the card's edge and border never lag behind)
+        Modifier.fillMaxWidth()
             .clip(shape).background(bg).border(if (selected) 2.dp else 1.dp, border, shape).tap(onClick = onTap).padding(16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -220,8 +218,10 @@ private fun PwCard(p: PasswordEntity, selected: Boolean, show: Boolean, onTap: (
                 }
             }
         }
-        AnimatedVisibility(selected, enter = expandVertically(spring(dampingRatio = .86f, stiffness = Spring.StiffnessMediumLow)) + fadeIn(tween(220, 80)),
-            exit = shrinkVertically(tween(200)) + fadeOut(tween(120))) {
+        // The card opens; the keys fade in once there's room for them (never shown half cut off), and fade first on closing.
+        AnimatedVisibility(selected, enter = expandVertically(tween(280, easing = com.familydocs.app.ui.ds.FdEase), clip = false) +
+                fadeIn(tween(170, delayMillis = 150)) + androidx.compose.animation.scaleIn(tween(240, delayMillis = 120, easing = com.familydocs.app.ui.ds.FdEase), initialScale = .94f),
+            exit = fadeOut(tween(90)) + shrinkVertically(tween(220, delayMillis = 60, easing = com.familydocs.app.ui.ds.FdEase), clip = false)) {
             Row(Modifier.padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ActionKey(if (show) "eyeoff" else "eye", if (show) "Hide password" else "View password", c.fg, onView, Modifier.weight(1f))
                 ActionKey("copy", "Copy password", c.fg, onCopy, Modifier.weight(1f))
@@ -319,9 +319,3 @@ private fun SetPinSheet(pin: PasscodeManager, appPasscode: PasscodeManager, onDo
     }
 }
 
-private val WORDS = listOf("mango", "river", "lotus", "monsoon", "cedar", "harbor", "saffron", "olive", "aegean", "tulip")
-private fun generatePassword(): String {
-    val r = SecureRandom()
-    fun w() = WORDS[r.nextInt(WORDS.size)]
-    return "${w()}-${w().replaceFirstChar { it.uppercase() }}-${r.nextInt(90) + 10}${"!#%&"[r.nextInt(4)]}"
-}

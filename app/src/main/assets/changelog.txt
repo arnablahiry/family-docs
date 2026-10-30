@@ -7,7 +7,9 @@
 - Group settings shows who's synced and who isn't yet, and Home names anyone who isn't.
 - Adding the invite of someone already in the group no longer asks you to send yours back.
 - Edit photo: reopen a profile, group or event picture and reframe it (the whole original photo, as you framed it).
-- Silent notifications when someone in your group adds, changes or removes documents ("Mohua · Family: added Passport").
+- Silent notifications when someone in your group adds, changes or removes documents ("Family: Mohua added Passport").
+- Date fields have a calendar to pick from, as well as typing DD/MM/YYYY.
+- Logins open more smoothly when you tap one; the password generator button is gone.
 - The scanner reads the date of issue as well as the expiry (labels side by side, Greek capitals, "valid from … to …").
 - Auto-read fields aren't marked any more.
 - Notes: Back or a tap outside ends typing (Back no longer leaves the page while you type).

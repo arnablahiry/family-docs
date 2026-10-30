@@ -92,6 +92,11 @@ object DocTypes {
 
     fun isSensitive(label: String) = SENSITIVE.containsMatchIn(label)
 
+    private val DATE_LABEL = Regex("\\bdate|\\bvalid|expir|until|issued(?!\\s*by)|birth|born|\\bdob\\b|\\bfrom\\b|έκδοσ|λήξ|ισχύ|γέννησ|ημερομηνία", RegexOption.IGNORE_CASE)
+    private val DATE_VALUE = Regex("^\\s*\\d{1,2}/\\d{1,2}/\\d{4}\\s*$")
+    /** A field that holds a date (by its label, or a DD/MM/YYYY value): it gets a calendar to pick from. */
+    fun isDate(label: String, value: String = "") = DATE_LABEL.containsMatchIn(label) || DATE_VALUE.matches(value)
+
     /** National ID cards show the issuing country's flag on their card unless turned off; other documents only when turned on. */
     fun flagByDefault(name: String) = forName(name).key in FLAG_TYPES
 

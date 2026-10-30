@@ -13,9 +13,9 @@ import com.familydocs.app.R
 import com.familydocs.app.events.EventReminders
 
 /**
- * Silent notifications when someone in a group changes things ("Mohua · Family: added Passport, updated Driving
- * licence"): no sound, no vibration, no pop-up; they just wait in the notification shade. On the lock screen only
- * "Lararium · Family has updates" shows. Turn them off in the phone's settings (Lararium › Notifications › Group activity).
+ * Silent notifications when someone in a group changes things ("Family" · "Mohua added Passport, updated Driving
+ * licence"): no sound, no vibration, no pop-up; they just wait in the notification shade (and show in full on the
+ * lock screen). Turn them off in the phone's settings (Lararium › Notifications › Group activity).
  */
 object GroupActivity {
     private const val CHANNEL = "group_activity"
@@ -32,13 +32,11 @@ object GroupActivity {
         val id = "$groupId|$who".hashCode()
         val open = PendingIntent.getActivity(context, id, Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val text = what.joinToString(", ").replaceFirstChar { it.uppercase() }
-        val hidden = NotificationCompat.Builder(context, CHANNEL).setSmallIcon(R.drawable.ic_stat_event)
-            .setContentTitle("Lararium").setContentText("$groupName has updates").build()
+        val text = "$who " + what.joinToString(", ")
         val n = NotificationCompat.Builder(context, CHANNEL).setSmallIcon(R.drawable.ic_stat_event)
-            .setContentTitle("$who · $groupName").setContentText(text).setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setContentTitle(groupName).setContentText(text).setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setSilent(true).setPriority(NotificationCompat.PRIORITY_LOW).setOnlyAlertOnce(true)
-            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE).setPublicVersion(hidden)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setContentIntent(open).setAutoCancel(true).build()
         try { NotificationManagerCompat.from(context).notify(id, n) } catch (_: SecurityException) { }
     }

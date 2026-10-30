@@ -52,6 +52,8 @@ internal val ICON_PATHS: Map<String, List<Pair<String, Boolean>>> = mapOf(
     "refresh" to listOf("M20 11a8 8 0 0 0-14.3-4.3L4 9M4 4v5h5M4 13a8 8 0 0 0 14.3 4.3L20 15M20 20v-5h-5" to false),
     "dice" to listOf("M7 4h10a3 3 0 0 1 3 3v10a3 3 0 0 1 -3 3h-10a3 3 0 0 1 -3 -3v-10a3 3 0 0 1 3 -3z" to false, "M8 9a1 1 0 1 0 2 0a1 1 0 1 0 -2 0z" to false, "M14 15a1 1 0 1 0 2 0a1 1 0 1 0 -2 0z" to false, "M14 9a1 1 0 1 0 2 0a1 1 0 1 0 -2 0z" to false, "M8 15a1 1 0 1 0 2 0a1 1 0 1 0 -2 0z" to false),
     "grid" to listOf("M6 4h3a2 2 0 0 1 2 2v3a2 2 0 0 1 -2 2h-3a2 2 0 0 1 -2 -2v-3a2 2 0 0 1 2 -2z" to false, "M15 4h3a2 2 0 0 1 2 2v3a2 2 0 0 1 -2 2h-3a2 2 0 0 1 -2 -2v-3a2 2 0 0 1 2 -2z" to false, "M6 13h3a2 2 0 0 1 2 2v3a2 2 0 0 1 -2 2h-3a2 2 0 0 1 -2 -2v-3a2 2 0 0 1 2 -2z" to false, "M15 13h3a2 2 0 0 1 2 2v3a2 2 0 0 1 -2 2h-3a2 2 0 0 1 -2 -2v-3a2 2 0 0 1 2 -2z" to false),
+    "calendar" to listOf("M5 6.5h14a1.5 1.5 0 0 1 1.5 1.5v11a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 19V8A1.5 1.5 0 0 1 5 6.5z" to false,
+        "M3.5 10.5h17" to false, "M8 4v4M16 4v4" to false, "M7.5 14h2M11 14h2M14.5 14h2M7.5 17h2M11 17h2" to false),
     "bell" to listOf("M6.5 16.5V11a5.5 5.5 0 0 1 11 0v5.5l1.5 2h-14z" to false, "M10 20.5a2 2 0 0 0 4 0" to false),
     "ticket" to listOf("M4 7.5A1.5 1.5 0 0 1 5.5 6h13A1.5 1.5 0 0 1 20 7.5v2.3a2.2 2.2 0 0 0 0 4.4v2.3a1.5 1.5 0 0 1 -1.5 1.5h-13A1.5 1.5 0 0 1 4 16.5v-2.3a2.2 2.2 0 0 0 0 -4.4z" to false, "M14 6.5v2M14 11v2M14 15.5v2" to false),
     "bed" to listOf("M3 18.5V6.5" to false, "M3 14h18v4.5" to false, "M21 14v-2.5a2.5 2.5 0 0 0 -2.5 -2.5H11v5" to false, "M5.3 11.2a1.7 1.7 0 1 0 3.4 0a1.7 1.7 0 1 0 -3.4 0z" to false),

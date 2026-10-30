@@ -93,6 +93,8 @@ import java.io.File
 fun AddDocumentScreen(memberId: String, docId: String?, onBack: () -> Unit, onSaved: () -> Unit, eventId: String? = null) {
     val app = LocalContainer.current
     val c = Fd.c
+    /** The field whose date is being picked on the calendar (its index). */
+    var pickingDate by remember { mutableStateOf<Int?>(null) }
     val context = LocalContext.current
     val toast = LocalToast.current
     val vm = appViewModel(key = "doc-$memberId-$docId-$eventId") { AddDocumentViewModel(it, context.applicationContext, memberId, docId, eventId) }
@@ -222,10 +224,14 @@ fun AddDocumentScreen(memberId: String, docId: String?, onBack: () -> Unit, onSa
                                     BasicTextField(f.label, { vm.updateField(i, f.copy(label = it)) }, singleLine = true, textStyle = fdText(11f, FontWeight.Medium, c.muted),
                                         cursorBrush = SolidColor(c.primary), modifier = Modifier.weight(1f, fill = false))
                                 }
+                                val isDate = com.familydocs.app.domain.DocTypes.isDate(f.label, f.value)
                                 BasicTextField(f.value, { vm.updateField(i, f.copy(value = it)) }, singleLine = true, textStyle = fdText(14.5f, color = c.fg),
                                     cursorBrush = SolidColor(c.primary), modifier = Modifier.fillMaxWidth(),
-                                    decorationBox = { inner -> Box { if (f.value.isEmpty()) Text("—", style = fdText(14.5f, color = c.muted)); inner() } })
+                                    decorationBox = { inner -> Box { if (f.value.isEmpty()) Text(if (isDate) "DD/MM/YYYY" else "—", style = fdText(14.5f, color = c.muted)); inner() } })
                             }
+                            // dates: type DD/MM/YYYY, or pick it on a calendar
+                            if (com.familydocs.app.domain.DocTypes.isDate(f.label, f.value))
+                                FdIconButton("calendar", { pickingDate = i }, size = 32.dp, iconSize = 17.dp, tint = c.muted, description = "Pick ${f.label} on a calendar")
                             FdIconButton("close", { vm.removeField(i) }, size = 32.dp, iconSize = 16.dp, tint = c.muted, description = "Remove field")
                         }
                     }
@@ -243,6 +249,10 @@ fun AddDocumentScreen(memberId: String, docId: String?, onBack: () -> Unit, onSa
             Spacer(Modifier.height(24.dp))
         }
         FdSavebar { FdButton(if (vm.saving) "Saving…" else "Save document", ::save, icon = "check", enabled = !vm.saving) }
+    }
+    pickingDate?.let { at ->
+        val f = vm.fields.getOrNull(at) ?: run { pickingDate = null; return@let }
+        FdDatePickerDialog(f.value, onPick = { v -> vm.updateField(at, f.copy(value = v)) }, onDismiss = { pickingDate = null })
     }
 }
 
@@ -313,3 +323,27 @@ private fun Shimmer() {
     }
 }
 
+/** A calendar for a DD/MM/YYYY field: opens on the date already there (or today) and writes the picked day back. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun FdDatePickerDialog(value: String, onPick: (String) -> Unit, onDismiss: () -> Unit) {
+    val fmt = java.time.format.DateTimeFormatter.ofPattern("dd/MM/uuuu")
+    val current = remember(value) {
+        Regex("(\\d{1,2})/(\\d{1,2})/(\\d{4})").find(value)?.destructured?.let { (d, m, y) -> runCatching { java.time.LocalDate.of(y.toInt(), m.toInt(), d.toInt()) }.getOrNull() }
+    }
+    val state = androidx.compose.material3.rememberDatePickerState(
+        initialSelectedDateMillis = current?.atStartOfDay(java.time.ZoneOffset.UTC)?.toInstant()?.toEpochMilli(),
+        initialDisplayedMonthMillis = (current ?: java.time.LocalDate.now()).atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli(),
+        yearRange = 1900..2100,
+    )
+    androidx.compose.material3.DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            com.familydocs.app.ui.ds.FdTextButton("OK", {
+                state.selectedDateMillis?.let { ms -> onPick(java.time.Instant.ofEpochMilli(ms).atZone(java.time.ZoneOffset.UTC).toLocalDate().format(fmt)) }
+                onDismiss()
+            })
+        },
+        dismissButton = { com.familydocs.app.ui.ds.FdTextButton("Cancel", onDismiss) },
+    ) { androidx.compose.material3.DatePicker(state) }
+}
