@@ -3,8 +3,9 @@
 # release notes. One "- " line per change, written for the people using the app.
 
 ## 0.8.6
+- After joining a group, a sheet shows who you're not synced with yet and your link to send them. Minimise it (−) and a short "Not synced with everyone" box stays on Home until you are; tap it to open the sheet again.
 - When someone adds you back, Lararium says so: "You and Teesta are now synced!"
-- Group settings shows who's synced and who isn't yet, and Home names anyone who isn't.
+- Group settings shows who's synced and who isn't yet.
 - Adding the invite of someone already in the group no longer asks you to send yours back.
 - Edit photo: reopen a profile, group or event picture and reframe it (the whole original photo, as you framed it).
 - Silent notifications when someone in your group adds, changes or removes documents ("Family: Mohua added Passport").

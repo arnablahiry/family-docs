@@ -109,6 +109,10 @@ fun FamilyScreen(onMember: (String) -> Unit, onSettings: () -> Unit, onDocument:
         onDispose { lifecycle.removeObserver(obs) }
     }
     var sheet by remember { mutableStateOf<String?>(null) } // "create" | "join"
+    // The "not synced yet" sheet (group id): opens after joining a group; minimised, it's the short box on Home.
+    var syncSheetFor by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+    val openSync by app.openSyncSheet.collectAsStateWithLifecycle()
+    LaunchedEffect(openSync) { openSync?.let { syncSheetFor = it; app.openSyncSheet.value = null } }
     // Opened from an invite link (or an invite shared to Lararium): the join sheet, filled in.
     var joinText by remember { mutableStateOf("") }
     val incoming by app.incomingInvite.collectAsStateWithLifecycle()
@@ -140,26 +144,10 @@ fun FamilyScreen(onMember: (String) -> Unit, onSettings: () -> Unit, onDocument:
                 FdIconButton("close", { app.share.dismissNotice(n.id) }, size = 32.dp, iconSize = 15.dp, description = "Dismiss")
             }
         }
-        // Who isn't synced with you yet (both ways). No one has added you: send your invite. Otherwise their phones
-        // pick you up on their next sync; the note can be closed until the list changes.
+        // Not synced with everyone in this group yet: a short box; tapping it opens the sheet with who and your link.
         val shown = groups.firstOrNull { it.id == gid }
         val waiting = shown?.peerList.orEmpty().filter { !it.synced }
-        if (shown != null && waiting.isNotEmpty()) {
-            val nobody = shown.peerList.all { it.sees == false }
-            var hiddenFor by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
-            val key = shown.id + waiting.joinToString { it.key }
-            if (nobody || hiddenFor != key) {
-                var sending by remember { mutableStateOf(false) }
-                val sendBack = com.familydocs.app.ui.home.rememberInviteSender { sending = it }
-                val who = com.familydocs.app.data.Peer.names(waiting.map { it.name.ifBlank { "Someone" } })
-                FdBanner("people", if (nobody) "No one in ${shown.name} has added you yet. Send them your invite: one tap on it adds you."
-                    else "$who ${if (waiting.size == 1) "isn't" else "aren't"} synced yet. ${if (waiting.size == 1) "Their phone picks" else "Their phones pick"} you up the next time they open Lararium.",
-                    Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 6.dp), accent = nobody) {
-                    if (nobody) com.familydocs.app.ui.ds.FdTextButton(if (sending) "…" else "Send", { sendBack(shown.id) }, enabled = !sending)
-                    else FdIconButton("close", { hiddenFor = key }, size = 32.dp, iconSize = 15.dp, description = "Dismiss")
-                }
-            }
-        }
+        if (shown != null && waiting.isNotEmpty()) SyncBox(shown, waiting, Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 6.dp)) { syncSheetFor = shown.id }
         // First time after an update: what changed, until it's closed.
         val news by app.whatsNew.entries.collectAsStateWithLifecycle()
         if (news.isNotEmpty()) WhatsNewBox(news, Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 6.dp)) { app.whatsNew.dismiss() }
@@ -174,10 +162,12 @@ fun FamilyScreen(onMember: (String) -> Unit, onSettings: () -> Unit, onDocument:
             onDismiss = { sheet = null })
         "join" -> androidx.compose.runtime.key(joinText) { JoinGroupSheet(onJoined = { id, from ->
             app.selectGroup(id)
-            if (from != null) settingsFor = Triple(id, "joined", from)
+            // joined a group that already has people: who you're not synced with yet, and your link to send them
+            if (from != null) syncSheetFor = id
         }, onDismiss = { sheet = null; joinText = "" }, initial = joinText) }
     }
     settingsFor?.let { (id, intro, from) -> GroupSettingsSheet(id, intro, from, onMember = onMember) { settingsFor = null } }
+    syncSheetFor?.let { id -> groups.firstOrNull { it.id == id }?.let { g -> SyncSheet(g) { syncSheetFor = null } } }
 }
 
 /** One group's home: its people, search and events (keyed by group, so the switch animation shows the right page). */
@@ -473,5 +463,70 @@ private fun WhatsNewBox(entries: List<com.familydocs.app.domain.Changelog.Entry>
             if (entries.size > 1) Text(if (all) "Show less" else "Also new since you last updated: ${entries.drop(1).joinToString(", ") { it.version }} ▾",
                 style = fdText(12f, FontWeight.SemiBold, c.primary), modifier = Modifier.padding(top = 8.dp).clickable { all = !all })
         }
+    }
+}
+
+/** Home: "Not synced with everyone in Family" (or with one person by name); tap to open [SyncSheet]. */
+@Composable
+private fun SyncBox(g: com.familydocs.app.data.GroupEntity, waiting: List<com.familydocs.app.data.Peer>, modifier: Modifier, onOpen: () -> Unit) {
+    val c = Fd.c
+    Row(modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.accentSoft).clickable(onClick = onOpen).padding(start = 12.dp, end = 8.dp, top = 11.dp, bottom = 11.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        FdIcon("refresh", 18.dp)
+        Text(if (waiting.size == 1 && g.peerList.size > 1) "Not synced with ${waiting[0].name.ifBlank { "someone" }} in ${g.name}"
+             else if (g.peerList.size == 1) "Not synced with ${waiting[0].name.ifBlank { "the others" }} in ${g.name} yet"
+             else "Not synced with everyone in ${g.name}", style = fdText(12.5f, FontWeight.Medium), modifier = Modifier.weight(1f), maxLines = 2)
+        Text("Show", style = fdText(12.5f, FontWeight.SemiBold, c.primary))
+    }
+}
+
+/**
+ * Who in [g] you're not synced with yet and why, with your link to send them (tapping it on their phone adds you).
+ * "−" (or a swipe down) minimises it to the box on Home; once everyone's synced it says so.
+ */
+@Composable
+private fun SyncSheet(g: com.familydocs.app.data.GroupEntity, onMinimise: () -> Unit) {
+    val app = LocalContainer.current
+    val c = Fd.c
+    val waiting = g.peerList.filter { !it.synced }
+    val members by remember(g.id) { app.repo.membersOf(g.id) }.collectAsStateWithLifecycle(emptyList())
+    var sending by remember { mutableStateOf(false) }
+    val send = com.familydocs.app.ui.home.rememberInviteSender { sending = it }
+    // look again now (their phones may have added you meanwhile)
+    LaunchedEffect(g.id) { com.familydocs.app.backup.BackupWorker.syncShares(app.appContext) }
+    val names = com.familydocs.app.data.Peer.names(waiting.map { it.name.ifBlank { "someone" } })
+    com.familydocs.app.ui.ds.FdSheet(onMinimise) {
+        Row(verticalAlignment = Alignment.Top) {
+            Column(Modifier.weight(1f).padding(bottom = 12.dp)) {
+                Text(if (waiting.isEmpty()) "You're synced with everyone" else "Not synced with $names yet", style = fdText(18f, FontWeight.Bold))
+                Text("in ${g.name}", style = fdText(13f, color = c.muted), modifier = Modifier.padding(top = 2.dp))
+            }
+            FdIconButton("minus", onMinimise, size = 36.dp, iconSize = 18.dp, tint = c.muted, description = "Minimise")
+        }
+        if (waiting.isEmpty()) {
+            FdBanner("check", "Everyone in ${g.name} sees your documents, and you see theirs.")
+            com.familydocs.app.ui.ds.FdButton("Done", onMinimise, Modifier.padding(top = 16.dp))
+        } else {
+            Text("Send them your link. Tapping it on their phone adds you, and you're synced. Sending it once to the family chat is enough.",
+                style = fdText(13f, color = c.muted), modifier = Modifier.padding(bottom = 12.dp))
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).border(1.dp, c.line, RoundedCornerShape(16.dp))) {
+                waiting.forEachIndexed { i, p ->
+                    if (i > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(c.line))
+                    val m = members.firstOrNull { it.origin == p.key && !it.shared }
+                    Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        com.familydocs.app.ui.ds.FdAvatar(p.name.ifBlank { m?.name ?: "?" }, 36.dp, photoFile = m?.photoFile, character = m?.avatar)
+                        Column(Modifier.weight(1f)) {
+                            Text(p.name.ifBlank { m?.name ?: "Group member" }, style = fdText(14.5f, FontWeight.Medium))
+                            Text(when { p.at == 0L -> "Not read yet"; p.sees == false -> "Hasn't added you yet"; else -> "Syncing…" }, style = fdText(12f, color = c.muted))
+                        }
+                    }
+                }
+            }
+            com.familydocs.app.ui.ds.FdButton(if (sending) "Preparing your link…" else "Send my link to them", { send(g.id) }, Modifier.padding(top = 16.dp),
+                icon = "share", enabled = !sending)
+            Text("Already sent it? You're synced as soon as they tap it; this stays on Home until then.",
+                style = fdText(12f, color = c.muted), modifier = Modifier.padding(top = 10.dp))
+        }
+        Spacer(Modifier.height(10.dp))
     }
 }

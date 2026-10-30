@@ -42,6 +42,8 @@ class AppContainer(context: Context) {
     val updater = com.familydocs.app.update.AppUpdater(app)
     /** An invite that opened the app (tapped link or shared text), waiting for Home or sign-up to use it. */
     val incomingInvite = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    /** A group just joined (at sign-up): Home opens its "not synced yet" sheet once. */
+    val openSyncSheet = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
     /** Originals behind cropped pictures, for "Edit photo". */
     val photoSources by lazy { com.familydocs.app.data.PhotoSources(app, files) }
     /** The "what's new" note on Home after an update. */

@@ -191,7 +191,7 @@ class OnboardingViewModel(private val c: AppContainer) : ViewModel() {
         // the whole photo too, for a later "Edit photo"
         picked?.let { bmp -> if (bytes != null) withContext(Dispatchers.IO) { runCatching { c.photoSources.keep(bytes, bmp, crop.zoom, crop.pan.x / cropBoxPx, crop.pan.y / cropBoxPx, null) } } }
         // (if it can't be read right now, the group is still added and the next sync tries again)
-        if (invite != null) runCatching { c.share.accept(session?.token, invite) }
+        if (invite != null) runCatching { c.share.accept(session?.token, invite) }.onSuccess { c.openSyncSheet.value = it.group.id }
         pendingPasscode?.let { code -> withContext(Dispatchers.Default) { c.passcode.set(code) } }
         if (biometric != null) c.settings.update { it.copy(biometric = biometric) }
         if (!editing && googleLinked) c.setBackups(true, now = true) // first backup straight away
