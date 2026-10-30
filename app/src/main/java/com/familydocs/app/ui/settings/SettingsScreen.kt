@@ -401,7 +401,8 @@ private fun UpdateRow(updater: com.familydocs.app.update.AppUpdater, beforeLeavi
             ReleaseNotes(st.release)
         }
         is com.familydocs.app.update.AppUpdater.State.Downloading -> {
-            FdListItem("Downloading ${st.release.version}…", "${(st.progress * 100).toInt()}% · keeps going in the background (see the notification); the installer opens when it's done", icon = "cloud")
+            FdListItem("Downloading ${st.release.version}…", "${(st.progress * 100).toInt()}% · keeps going in the background (see the notification); the installer opens when it's done", icon = "cloud",
+                trailing = { FdIconButton("close", { updater.cancel() }, size = 36.dp, iconSize = 16.dp, tint = Fd.c.muted, description = "Stop the download") })
             ReleaseNotes(st.release)
         }
         com.familydocs.app.update.AppUpdater.State.Checking -> FdListItem("Checking for updates…", null, icon = "refresh")

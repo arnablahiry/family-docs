@@ -233,6 +233,7 @@ private fun GroupHome(g: String?, onMember: (String) -> Unit, onSettings: () -> 
                                 FdIcon("download", 18.dp)
                                 Text("Downloading Lararium ${u.release.version}…", style = fdText(12.5f), modifier = Modifier.weight(1f))
                                 Text("${(u.progress * 100).toInt()}%", style = fdText(12.5f, FontWeight.SemiBold))
+                                FdIconButton("close", { app.updater.cancel() }, size = 28.dp, iconSize = 14.dp, tint = c.muted, description = "Stop the download")
                             }
                             Box(Modifier.padding(top = 8.dp).fillMaxWidth().height(5.dp).clip(RoundedCornerShape(3.dp)).background(c.surface)) {
                                 Box(Modifier.fillMaxWidth(shown.coerceIn(0f, 1f)).fillMaxHeight().clip(RoundedCornerShape(3.dp)).background(c.accent))

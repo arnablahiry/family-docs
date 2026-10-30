@@ -85,9 +85,25 @@ class AppUpdater(private val context: Context) {
         runCatching { install(file) }.onFailure { _state.value = State.Failed("Downloaded, but the installer didn't open. Tap to try again.") }
     }
 
+    /** A download stopped with ✕: its watcher ends quietly (no "didn't finish" message). */
+    @Volatile private var cancelled = -1L
+
+    /** Stops the download (✕ on Home or in Settings): the partial file goes, and the update is offered again. */
+    fun cancel() {
+        val r = (_state.value as? State.Downloading)?.release ?: return
+        val id = prefs.getLong(KEY_ID, -1L)
+        cancelled = id
+        val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
+        if (id >= 0) runCatching { dm.remove(id) }
+        prefs.edit().remove(KEY_ID).remove(KEY_VERSION).apply()
+        runCatching { apkFile(r).delete() }
+        _state.value = State.Available(r)
+    }
+
     /** Watches download [id] until it's done; true when the file is complete. */
     private suspend fun follow(dm: android.app.DownloadManager, id: Long, r: Release): Boolean {
         while (true) {
+            if (cancelled == id) return false
             val (status, done, total, reason) = withContext(Dispatchers.IO) {
                 dm.query(android.app.DownloadManager.Query().setFilterById(id))?.use { c ->
                     if (!c.moveToFirst()) null
@@ -102,6 +118,7 @@ class AppUpdater(private val context: Context) {
             when (status.toInt()) {
                 android.app.DownloadManager.STATUS_SUCCESSFUL -> return true
                 android.app.DownloadManager.STATUS_FAILED -> {
+                    if (cancelled == id) return false
                     _state.value = State.Failed("Couldn't download the update (${reason}). Check the connection and try again.")
                     return false
                 }

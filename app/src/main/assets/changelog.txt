@@ -2,15 +2,18 @@
 # the app shows it once after updating, Settings lists it under "Update" before downloading, and CI puts it in the
 # release notes. One "- " line per change, written for the people using the app.
 
+## 0.8.7
+- An update that's downloading can be stopped with ✕ (on Home or in Settings); it's offered again afterwards.
+
 ## 0.8.6
 - After joining a group, a sheet shows who you're not synced with yet and your link to send them. Swipe it away and a short "Not synced with everyone" box stays on Home until you are; tap it to open the sheet again.
-- When someone adds you back, Lararium says so: "You and Teesta are now synced!"
+- When someone adds you back, Lararium says so: "You and Lily are now synced!"
 - Group settings shows who's synced and who isn't yet.
 - Adding the invite of someone already in the group no longer asks you to send yours back.
 - Edit photo: reopen a profile, group or event picture and reframe it (the whole original photo, as you framed it).
 - Changes go out to your group within seconds; while Lararium is open, the others' changes come in within a minute (every 15 minutes in the background).
 - "Made with ♥" stays at the very bottom of Home, however little is on it.
-- Silent notifications when someone in your group adds, changes or removes documents ("Family: Mohua added Passport").
+- Silent notifications when someone in your group adds, changes or removes documents ("Family: Jane added Passport").
 - Date fields have a calendar to pick from, as well as typing DD/MM/YYYY.
 - Logins open more smoothly when you tap one; the password generator button is gone.
 - The scanner reads the date of issue as well as the expiry (labels side by side, Greek capitals, "valid from … to …").
