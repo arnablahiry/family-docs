@@ -29,6 +29,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -136,6 +137,14 @@ fun RegisterScreen(vm: OnboardingViewModel, onBack: () -> Unit, title: String = 
     val container = LocalContainer.current
     val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> uri?.let { vm.pickPhoto(context, it) } }
     val e = vm.errors
+    // Opened from an invite link before having an account: set up to join that group.
+    val incoming by container.incomingInvite.collectAsStateWithLifecycle()
+    androidx.compose.runtime.LaunchedEffect(incoming) {
+        val t = incoming ?: return@LaunchedEffect
+        if (vm.editing) return@LaunchedEffect
+        vm.groupMode = "join"; vm.groupCode = com.familydocs.app.domain.GroupInvite.find(t)?.encode() ?: t
+        container.incomingInvite.value = null
+    }
     val connectGoogle = rememberGoogleConnect { vm.onGoogle(it) }
     Column(Modifier.fillMaxSize().background(c.bg).statusBarsPadding().imePadding()) {
         FdTopBar(title, onBack)

@@ -40,6 +40,8 @@ class AppContainer(context: Context) {
     val appScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main.immediate)
     /** In-app updates from the GitHub releases (checked at app start; Settings › About shows and installs them). */
     val updater = com.familydocs.app.update.AppUpdater(app)
+    /** An invite that opened the app (tapped link or shared text), waiting for Home or sign-up to use it. */
+    val incomingInvite = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
     /** The "what's new" note on Home after an update. */
     val whatsNew by lazy { com.familydocs.app.update.WhatsNew(app) }
     /** Optional backup password for logins (Settings › Backup). */

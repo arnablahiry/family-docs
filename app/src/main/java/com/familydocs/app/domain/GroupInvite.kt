@@ -33,8 +33,14 @@ data class GroupInvite(
 
     fun encode(): String = PREFIX + b64(pack())
 
-    /** What gets sent through WhatsApp, Messages…: a sentence for the person and the invite itself. */
-    fun message(): String = "$fromName invited you to the group \"$name\" in Lararium. In the app: Join group → paste this.\n\n${encode()}"
+    /** The invite as a link: the page opens Lararium with it (the invite is after "#", so it never reaches the site). */
+    fun link(): String = LINK + encode()
+
+    /**
+     * What gets sent through WhatsApp, Messages…: works both ways, to someone joining and back to whoever invited you
+     * (tapping it adds you to their phone).
+     */
+    fun message(): String = "$fromName · Lararium group \"$name\"\nTap to join it, or to add $fromName if you're already in it:\n${link()}"
 
     private fun pack(): ByteArray {
         val out = ByteArrayOutputStream()
@@ -53,6 +59,7 @@ data class GroupInvite(
 
     companion object {
         const val PREFIX = "LR."
+        const val LINK = "https://arnablahiry.github.io/software/lararium/join#"
         private const val OLD = "FD1."
         private val PATTERN = Regex("(?<![A-Za-z0-9])(LR\\.|FD1\\.)[A-Za-z0-9_-]{20,}")
         private const val B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"

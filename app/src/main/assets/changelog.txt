@@ -2,6 +2,12 @@
 # the app shows it once after updating, Settings lists it under "Update" before downloading, and CI puts it in the
 # release notes. One "- " line per change, written for the people using the app.
 
+## 0.8.5
+- Invites are links now: tapping one opens Lararium and joins the group, or adds the person who sent it if you're already in it.
+- Right after joining, Lararium opens the share sheet so you can send your invite back in one go.
+- Until someone in the group has added you, Home reminds you to send your invite.
+- You can also share an invite straight to Lararium from any app.
+
 ## 0.8.4
 - Joining a group is invite-only now: no join requests with just the code, and no outside server at all.
 - Invites are much shorter (about 70 characters, starting with LR.). Older invites still work.

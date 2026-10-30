@@ -108,6 +108,10 @@ fun FamilyScreen(onMember: (String) -> Unit, onSettings: () -> Unit, onDocument:
         onDispose { lifecycle.removeObserver(obs) }
     }
     var sheet by remember { mutableStateOf<String?>(null) } // "create" | "join"
+    // Opened from an invite link (or an invite shared to Lararium): the join sheet, filled in.
+    var joinText by remember { mutableStateOf("") }
+    val incoming by app.incomingInvite.collectAsStateWithLifecycle()
+    LaunchedEffect(incoming) { incoming?.let { joinText = it; sheet = "join"; app.incomingInvite.value = null } }
     // Group settings (with a short explanation right after creating / joining): group id, intro, who invited you
     var settingsFor by remember { mutableStateOf<Triple<String, String?, String?>?>(null) }
     // First time on Home with a group you made at sign-up: explain backups and sharing once.
@@ -135,6 +139,16 @@ fun FamilyScreen(onMember: (String) -> Unit, onSettings: () -> Unit, onDocument:
                 FdIconButton("close", { app.share.dismissNotice(n.id) }, size = 32.dp, iconSize = 15.dp, description = "Dismiss")
             }
         }
+        // You joined, but no one in the group has added your invite yet: nobody sees your things until someone does.
+        val shown = groups.firstOrNull { it.id == gid }
+        if (shown != null && shown.peerList.isNotEmpty() && shown.peerList.all { it.sees == false }) {
+            var sending by remember { mutableStateOf(false) }
+            val sendBack = com.familydocs.app.ui.home.rememberInviteSender { sending = it }
+            FdBanner("people", "No one in ${shown.name} has added you yet. Send them your invite: one tap on it adds you.",
+                Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 6.dp)) {
+                com.familydocs.app.ui.ds.FdTextButton(if (sending) "…" else "Send", { sendBack(shown.id) }, enabled = !sending)
+            }
+        }
         // First time after an update: what changed, until it's closed.
         val news by app.whatsNew.entries.collectAsStateWithLifecycle()
         if (news.isNotEmpty()) WhatsNewBox(news, Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 6.dp)) { app.whatsNew.dismiss() }
@@ -147,10 +161,10 @@ fun FamilyScreen(onMember: (String) -> Unit, onSettings: () -> Unit, onDocument:
     when (sheet) {
         "create" -> NewGroupSheet(onCreated = { g -> app.selectGroup(g.id); app.settings.update { it.copy(groupIntroDone = true) }; settingsFor = Triple(g.id, "created", null) },
             onDismiss = { sheet = null })
-        "join" -> JoinGroupSheet(onJoined = { id, from ->
+        "join" -> androidx.compose.runtime.key(joinText) { JoinGroupSheet(onJoined = { id, from ->
             app.selectGroup(id)
             if (from != null) settingsFor = Triple(id, "joined", from)
-        }, onDismiss = { sheet = null })
+        }, onDismiss = { sheet = null; joinText = "" }, initial = joinText) }
     }
     settingsFor?.let { (id, intro, from) -> GroupSettingsSheet(id, intro, from, onMember = onMember) { settingsFor = null } }
 }

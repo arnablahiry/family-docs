@@ -105,6 +105,8 @@ fun GroupSettingsSheet(groupId: String, intro: String? = null, joinedFrom: Strin
     var removing by remember { mutableStateOf<String?>(null) }
     var croppingFor by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
     val sendInvite = rememberInviteSender { busy = if (it) "Preparing the invite…" else null }
+    // Just joined: your own invite goes back to whoever invited you (the share sheet opens by itself, once).
+    if (intro == "joined") androidx.compose.runtime.LaunchedEffect(g.id) { kotlinx.coroutines.delay(700); sendInvite(g.id) }
     val sync = rememberGoogleConnect { r ->
         r.onSuccess { s ->
             scope.launch {
@@ -285,26 +287,33 @@ private fun Label(text: String) {
  * Join a group: paste the invite someone in it sent you. (A group's code alone opens a group that's already on this phone.)
  */
 @Composable
-fun JoinGroupSheet(onJoined: (groupId: String, invitedBy: String?) -> Unit, onDismiss: () -> Unit) {
+fun JoinGroupSheet(onJoined: (groupId: String, invitedBy: String?) -> Unit, onDismiss: () -> Unit, initial: String = "") {
     val app = LocalContainer.current
     val c = Fd.c
+    val toast = LocalToast.current
     val scope = rememberCoroutineScope()
-    var text by remember { mutableStateOf("") }
+    var text by remember { mutableStateOf(initial) }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
+    // An invite for a group that's already here: it adds the person who sent it (their invite sent back to you).
+    val groups by app.repo.groups.collectAsStateWithLifecycle(emptyList())
+    val inv = remember(text) { GroupInvite.find(text) }
+    val here = inv?.let { i -> groups.firstOrNull { it.id == i.groupId } }
     FdSheet(onDismiss) {
-        SheetTitle("Join a group", "Paste the invite someone in the group sent you (it starts with LR.). Then send yours back to them, so they see you too.")
-        FdInput(text, { text = it; error = null }, placeholder = "LR.…", singleLine = false, error = error != null)
+        if (here != null) SheetTitle("Add someone to ${here.name}", "This is their invite: adding it puts them in ${here.name} on this phone, and everyone else in the group finds them through you.")
+        else SheetTitle("Join a group", "Paste the invite someone in the group sent you (or just tap the link they sent). Then send yours back to them, so they see you too.")
+        FdInput(text, { text = it; error = null }, placeholder = "LR.… or the invite link", singleLine = false, error = error != null)
         error?.let { Text(it, style = fdText(12.5f, color = c.danger), modifier = Modifier.padding(top = 8.dp)) }
-        FdButton(if (busy) "Opening the invite…" else "Join", {
+        FdButton(if (busy) "Opening the invite…" else if (here != null) "Add them" else "Join", {
             scope.launch {
                 busy = true
-                val inv = GroupInvite.find(text)
                 if (inv != null) {
                     runCatching { app.share.accept(null, inv) }.onSuccess { r ->
-                        // publishes your share in the background (needs Drive)
+                        // publishes your share and reads theirs in the background (needs Drive)
                         com.familydocs.app.backup.BackupWorker.syncShares(app.appContext)
-                        onJoined(r.group.id, r.fromName); onDismiss()
+                        if (r.joined) onJoined(r.group.id, r.fromName)
+                        else { toast.show("${r.fromName} is in ${r.group.name} now. Their documents come in with the sync."); onJoined(r.group.id, null) }
+                        onDismiss()
                     }.onFailure { error = it.message ?: "Couldn't use that invite" }
                 } else {
                     val local = app.repo.groupByCode(text)

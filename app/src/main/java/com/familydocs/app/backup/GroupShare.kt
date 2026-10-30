@@ -147,11 +147,11 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
             err
         }
         if (accessToken == null) BackupWorker.syncShares(context)
-        Accepted(dao.groupNow(g.id)!!, problem, inv.fromName, inv.from)
+        Accepted(dao.groupNow(g.id)!!, problem, inv.fromName, inv.from, joined = existing == null)
     }
 
     /** A joined (or updated) group, a problem reading the sender's share if there was one, and who sent the invite. */
-    data class Accepted(val group: GroupEntity, val problem: String?, val fromName: String, val fromKey: String)
+    data class Accepted(val group: GroupEntity, val problem: String?, val fromName: String, val fromKey: String, val joined: Boolean)
 
     /** Stops reading [peerKey]'s share and removes what they shared from this phone. */
     suspend fun forget(groupId: String, peerKey: String) = withContext(Dispatchers.IO) {

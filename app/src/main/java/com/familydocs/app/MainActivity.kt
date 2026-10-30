@@ -35,10 +35,23 @@ import kotlinx.coroutines.launch
 
 /** FragmentActivity (not plain ComponentActivity) because BiometricPrompt needs it. */
 class MainActivity : FragmentActivity() {
+    /** A tapped invite link, or an invite shared to Lararium: Home (or sign-up) offers to use it. */
+    private fun takeInvite(intent: android.content.Intent?) {
+        val text = intent?.dataString ?: intent?.getStringExtra(android.content.Intent.EXTRA_TEXT) ?: return
+        if (com.familydocs.app.domain.GroupInvite.find(text) != null) (application as FamilyDocsApp).container.incomingInvite.value = text
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        takeInvite(intent)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val container = (application as FamilyDocsApp).container
+        if (savedInstanceState == null) takeInvite(intent)
 
         // FLAG_SECURE: no screenshots, blank thumbnail in Recents.
         lifecycleScope.launch {
