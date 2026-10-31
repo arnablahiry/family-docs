@@ -66,6 +66,8 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
                 }
             }
             settleCreator(g.id, me)
+            // someone changed one of your events: share it on straight away, so everyone else sees it too
+            if (synchronized(ownEventsChanged) { ownEventsChanged.remove(g.id) }) runCatching { publish(drive, dao.groupNow(g.id) ?: g, me) }
         }
         if (problems.isEmpty()) "Group up to date" + if (received > 0) " · $received new or changed" else ""
         else "Some shares couldn't be read (${problems.joinToString("; ")})"
@@ -172,6 +174,9 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
         BackupCrypto.deriveKey(GroupCodes.normalize(g.code).toCharArray(), GroupInvite.salt(g.id))
     }
 
+    /** Groups where another member's change to one of your events was just taken over: shared on again right away. */
+    private val ownEventsChanged = mutableSetOf<String>()
+
     private suspend fun publish(drive: DriveClient, g: GroupEntity, me: MemberEntity): GroupEntity {
         val key = key(g); val salt = GroupInvite.salt(g.id)
         fun seal(b: ByteArray) = BackupCrypto.seal(b, key, salt)
@@ -222,8 +227,11 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
             .put("peers", JSONArray(g.peerList.map { JSONObject().put("key", it.key).put("name", it.name).put("index", it.index) }))
         // The Common vault's name and picture are everyone's: the newest change wins on every phone.
         common?.let { c -> index.put("commonAt", commonStamp(g.id, c)) }
-        // Events you made that someone else can see, with the documents added just for them.
-        val shared = dao.eventsNow().filter { it.groupId == g.id && !it.id.startsWith("s:") && (it.visibleIds.isEmpty() || it.visibleIds.any { v -> v != me.id }) }
+        // Events: yours that someone else can see (only you choose who), and the changes you made last to other people's
+        // events (everyone they're shared with can change them; the newest change wins), plus the documents you added to any.
+        val evs = dao.eventsNow().filter { it.groupId == g.id }
+        val own = evs.filter { !it.received && (it.visibleIds.isEmpty() || it.visibleIds.any { v -> v != me.id }) }
+        val theirs = evs.filter { it.received && it.id.startsWith("s:${g.id}:") }
         fun person(id: String): JSONObject? = when {
             id == me.id -> JSONObject().put("k", me.id).put("id", me.id)
             id == common?.id -> JSONObject().put("k", "common")
@@ -231,15 +239,18 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
             else -> null
         }
         fun docRef(id: String): JSONObject? = if (id.startsWith("s:${g.id}:")) person(id) else JSONObject().put("k", me.id).put("id", id)
-        index.put("events", JSONArray(shared.map { e ->
-            JSONObject().put("id", e.id).put("name", e.name).put("art", e.art).put("photo", upload(e.photoFile) ?: JSONObject.NULL)
-                .put("start", e.startDay).put("end", e.endDay ?: JSONObject.NULL).put("notes", e.notes).put("created", e.createdAt)
-                .put("people", JSONArray(e.peopleIds.mapNotNull(::person))).put("visible", JSONArray(e.visibleIds.mapNotNull(::person)))
-                .put("pins", JSONArray(e.pinIds.mapNotNull(::docRef)))
+        fun eventJson(e: EventEntity, id: String, owner: String) = JSONObject().put("id", id).put("owner", owner).put("name", e.name).put("art", e.art)
+            .put("photo", upload(e.photoFile) ?: JSONObject.NULL).put("start", e.startDay).put("end", e.endDay ?: JSONObject.NULL).put("notes", e.notes)
+            .put("created", e.createdAt).put("at", e.updatedAt).put("by", e.editedBy ?: me.id)
+            .put("people", JSONArray(e.peopleIds.mapNotNull(::person))).put("pins", JSONArray(e.pinIds.mapNotNull(::docRef)))
+        index.put("events", JSONArray(own.map { e -> eventJson(e, e.id, me.id).put("visible", JSONArray(e.visibleIds.mapNotNull(::person))) }))
+        index.put("eventEdits", JSONArray(theirs.filter { it.editedBy == null && it.updatedAt > 0 }.mapNotNull { e ->
+            e.organiserKey?.let { k -> eventJson(e, e.id.removePrefix("s:${g.id}:$k:"), k) }
         }))
-        val sharedIds = shared.map { it.id }.toSet()
-        index.put("eventDocs", JSONArray(dao.allDocumentsNow().filter { it.eventId in sharedIds && it.origin == null }.map { d ->
-            JSONObject().put("id", d.id).put("event", d.eventId).put("kind", if (d.memberId == common?.id) "common" else "self").put("name", d.name)
+        val eventRefs = own.associate { it.id to (me.id to it.id) } + theirs.mapNotNull { e -> e.organiserKey?.let { k -> e.id to (k to e.id.removePrefix("s:${g.id}:$k:")) } }
+        index.put("eventDocs", JSONArray(dao.allDocumentsNow().filter { it.eventId in eventRefs && it.origin == null }.map { d ->
+            val (owner, ev) = eventRefs.getValue(d.eventId!!)
+            JSONObject().put("id", d.id).put("event", ev).put("owner", owner).put("kind", if (d.memberId == common?.id) "common" else "self").put("name", d.name)
                 .put("fields", d.fieldsJson).put("text", d.rawText).put("ocr", d.readByOcr).put("country", d.country ?: JSONObject.NULL)
                 .put("display", d.display.name).put("flag", d.showFlag ?: JSONObject.NULL).put("created", d.createdAt).put("updated", d.updatedAt)
                 .put("files", JSONArray(d.attachments.mapNotNull { a -> upload(a.id)?.let { JSONObject().put("f", it).put("mime", a.mime) } }))
@@ -384,32 +395,50 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
             keepDocs += id; changed++
         }
 
-        // ---- their events that you can see (read-only here), with the documents added for them ----
+        // ---- events: theirs that you can see, changes anyone made to an event you can see, documents added to them ----
         val keepEvents = mutableSetOf<String>()
         val mySelf = dao.selfNow()?.id
         fun person(o: JSONObject): String? = when (val k = o.optString("k")) {
             myKey -> mySelf; "common" -> common?.id; "" -> null; else -> "s:${g.id}:$k:${o.optString("id")}"
         }
         fun refs(a: JSONArray?) = a?.let { (0 until it.length()).map { i -> it.getJSONObject(i) } }.orEmpty()
+        fun localEvent(owner: String, id: String) = if (owner == myKey) id else "s:${g.id}:$owner:$id"
+        /** [base] with the event's contents from [ev] (who sees it stays as it is: only the organiser changes that). */
+        fun content(ev: JSONObject, base: EventEntity) = base.copy(
+            name = ev.getString("name"), art = ev.optString("art", "trip"), photoFile = ev.optStringOrNull("photo")?.let { fetch(it) },
+            startDay = ev.getString("start"), endDay = ev.optStringOrNull("end"),
+            people = refs(ev.optJSONArray("people")).mapNotNull(::person).joinToString(","),
+            pins = refs(ev.optJSONArray("pins")).mapNotNull { r -> if (r.optString("k") == myKey) r.optString("id") else "s:${g.id}:${r.optString("k")}:${r.optString("id")}" }.joinToString(","),
+            notes = ev.optString("notes"), updatedAt = ev.optLong("at", 0L),
+            editedBy = ev.optString("by").ifEmpty { p.key }.takeIf { it != myKey } ?: p.key,
+        )
+        // their own events: they decide who sees them
         j.optJSONArray("events")?.forEachObj { ev ->
             val visible = refs(ev.optJSONArray("visible"))
             if (visible.isNotEmpty() && visible.none { it.optString("k") == myKey }) return@forEachObj
             val id = prefix + ev.getString("id")
             keepEvents += id
             val old = dao.eventNow(id)
-            val row = EventEntity(
-                id = id, name = ev.getString("name"), art = ev.optString("art", "trip"), photoFile = ev.optStringOrNull("photo")?.let { fetch(it) },
-                startDay = ev.getString("start"), endDay = ev.optStringOrNull("end"),
-                people = refs(ev.optJSONArray("people")).mapNotNull(::person).joinToString(","),
-                visibleTo = visible.mapNotNull(::person).joinToString(","),
-                pins = refs(ev.optJSONArray("pins")).mapNotNull { r -> if (r.optString("k") == myKey) r.optString("id") else "s:${g.id}:${r.optString("k")}:${r.optString("id")}" }.joinToString(","),
-                remindDays = old?.remindDays ?: -1, notes = ev.optString("notes"), createdAt = ev.optLong("created", old?.createdAt ?: 0L), groupId = g.id,
-            )
-            if (row != old) { dao.upsertEvent(row); if (old == null) activity += "added the event ${row.name}" }
+            val at = ev.optLong("at", 0L)
+            val vis = visible.mapNotNull(::person).joinToString(",")
+            val take = old == null || at > old.updatedAt || (at == 0L && old.updatedAt == 0L)
+            val row = (if (take) content(ev, old ?: EventEntity(id = id, name = "", art = "trip", startDay = "", remindDays = -1,
+                createdAt = ev.optLong("created", 0L), groupId = g.id)) else old!!).copy(visibleTo = vis, groupId = g.id)
+            if (row != old) { dao.upsertEvent(row); changed++; if (old == null) activity += "added the event ${row.name}" }
         }
+        // what they changed last in someone else's event (yours included) that you can see too
+        j.optJSONArray("eventEdits")?.forEachObj { ev ->
+            val owner = ev.optString("owner").ifEmpty { return@forEachObj }
+            val id = localEvent(owner, ev.getString("id"))
+            val old = dao.eventNow(id)?.takeIf { it.groupId == g.id } ?: return@forEachObj
+            if (ev.optLong("at", 0L) <= old.updatedAt) return@forEachObj
+            dao.upsertEvent(content(ev, old)); changed++
+            if (owner == myKey) synchronized(ownEventsChanged) { ownEventsChanged += g.id }
+        }
+        removeEvents(g, p.key, keepEvents)
         j.optJSONArray("eventDocs")?.forEachObj { d ->
-            val ev = prefix + d.getString("event")
-            if (ev !in keepEvents) return@forEachObj
+            val ev = localEvent(d.optString("owner").ifEmpty { p.key }, d.getString("event"))
+            if (dao.eventNow(ev)?.groupId != g.id) return@forEachObj
             val member = (if (d.optString("kind") == "common") common?.id else selfRow) ?: return@forEachObj
             val id = prefix + d.getString("id")
             keepDocs += id
@@ -427,7 +456,6 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
             ))
             changed++
         }
-        removeEvents(g, p.key, keepEvents)
 
         val keepPws = mutableSetOf<String>()
         val hadPws = if (common != null) dao.receivedPasswords(p.key, "$prefix%").map { it.id }.toSet() else emptySet()

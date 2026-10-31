@@ -272,9 +272,12 @@ class VaultRepository(private val dao: VaultDao, val files: FileStore) {
     fun event(id: String) = dao.event(id)
     fun eventDocuments(eventId: String) = dao.eventDocuments(eventId)
     suspend fun eventNow(id: String) = dao.eventNow(id)
-    suspend fun saveEvent(e: EventEntity) = withContext(Dispatchers.IO) { dao.upsertEvent(if (e.groupId == null) e.copy(groupId = groupId.value) else e); onChanged() }
+    suspend fun saveEvent(e: EventEntity) = withContext(Dispatchers.IO) {
+        val row = e.copy(updatedAt = System.currentTimeMillis(), editedBy = null)
+        dao.upsertEvent(if (row.groupId == null) row.copy(groupId = groupId.value) else row); onChanged()
+    }
     suspend fun setEventPins(id: String, pins: List<String>) = withContext(Dispatchers.IO) {
-        dao.eventNow(id)?.let { dao.upsertEvent(it.copy(pins = pins.distinct().joinToString(","))) }
+        dao.eventNow(id)?.let { dao.upsertEvent(it.copy(pins = pins.distinct().joinToString(","), updatedAt = System.currentTimeMillis(), editedBy = null)) }
         onChanged()
     }
     /** Deletes the event and the tickets/bookings added only for it. Pinned vault documents are untouched. */

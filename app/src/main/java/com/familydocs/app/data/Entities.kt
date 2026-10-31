@@ -230,7 +230,17 @@ data class EventEntity(
     val createdAt: Long = System.currentTimeMillis(),
     /** The group the event belongs to. Added in database version 7. */
     val groupId: String? = null,
+    /**
+     * When it was last changed, and by whom: null = on this phone, else that member's key. Everyone the event is shared
+     * with can change it, so the newest change wins on every phone. Database version 10.
+     */
+    val updatedAt: Long = 0L,
+    val editedBy: String? = null,
 ) {
+    /** Made by someone else (their event, shared with you): only they choose who sees it, or delete it. */
+    val received: Boolean get() = id.startsWith("s:")
+    /** The organiser's key, for an event someone else made. */
+    val organiserKey: String? get() = if (received) id.split(':', limit = 4).getOrNull(2) else null
     val peopleIds: List<String> get() = people.split(',').filter { it.isNotBlank() }
     val visibleIds: List<String> get() = visibleTo.split(',').filter { it.isNotBlank() }
     val pinIds: List<String> get() = pins.split(',').filter { it.isNotBlank() }
