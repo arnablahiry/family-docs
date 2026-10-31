@@ -409,7 +409,9 @@ class DriveBackup(
         val members = all.members.filter { it.isSelf || it.shared || it.groupId in whole }
         val ids = members.map { it.id }.toSet()
         val loginOwners = members.filter { it.isSelf || it.shared }.map { it.id }.toSet()
-        return all.copy(members = members, documents = all.documents.filter { it.memberId in ids }, passwords = all.passwords.filter { it.memberId in loginOwners })
+        // Other members' events (and what they added to them) are theirs: they come back from their shares, not your backup.
+        return all.copy(members = members, documents = all.documents.filter { it.memberId in ids && it.eventId?.startsWith("s:") != true },
+            passwords = all.passwords.filter { it.memberId in loginOwners }, events = all.events.filter { !it.id.startsWith("s:") })
     }
 
     private fun hex(argb: Long) = "#%06X".format(argb and 0xFFFFFF)

@@ -2,6 +2,11 @@
 # the app shows it once after updating, Settings lists it under "Update" before downloading, and CI puts it in the
 # release notes. One "- " line per change, written for the people using the app.
 
+## 0.8.9
+- Events now show up for everyone they're shared with, with their notes and the documents added for them
+- The Common vault's name and photo stay the same on every phone: the latest change wins
+- Events someone else made open read-only on your phone (they change them on theirs)
+
 ## 0.8.8
 - More kinds of event documents, each with its own icon: bike rental, restaurant booking and drinks (car rental now also covers taxis, car hire and parking).
 - An admin's changes to someone's documents or profile now show on everyone's phone straight away, not only once that person's phone has taken them over.

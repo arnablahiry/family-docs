@@ -162,9 +162,12 @@ fun EventScreen(eventId: String, onBack: () -> Unit, onEdit: () -> Unit, onDocum
     val pinned = e.pinIds.mapNotNull { id -> allDocs.firstOrNull { it.id == id && it.eventId == null } }
     val suggestions = suggestedPins(e, members, allDocs)
     val others = e.visibleIds.filter { it != self?.id }.mapNotNull { id -> members.firstOrNull { it.id == id }?.name }
+    // Someone else's event, shared with you: read-only here (they change it on their phone).
+    val sharedBy = if (e.id.startsWith("s:")) e.id.split(':').getOrNull(2)?.let { key -> members.firstOrNull { it.origin == key && !it.shared }?.name ?: "another member" } else null
+    val readOnly = sharedBy != null
 
     Column(Modifier.fillMaxSize().background(c.bg).statusBarsPadding()) {
-        FdTopBar("", onBack) { FdIconButton("edit", onEdit, iconSize = 20.dp, description = "Edit event") }
+        FdTopBar("", onBack) { if (!readOnly) FdIconButton("edit", onEdit, iconSize = 20.dp, description = "Edit event") }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).navigationBarsPadding()) {
             // `.mhero`
             Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -183,14 +186,15 @@ fun EventScreen(eventId: String, onBack: () -> Unit, onEdit: () -> Unit, onDocum
                     FdIcon("lock", 13.dp, 2f, c.muted)
                     Text(if (others.isEmpty()) "Only you can see this" else "Visible to you, ${others.joinToString(", ")}", style = fdText(11.5f, color = c.muted))
                 }
+                if (sharedBy != null) Text("Shared by $sharedBy", style = fdText(11.5f, color = c.muted), modifier = Modifier.padding(top = 2.dp))
             }
-            FdList(Modifier.padding(top = 16.dp)) {
+            if (!readOnly) FdList(Modifier.padding(top = 16.dp)) {
                 FdListItem("Reminder", Events.reminderLabel(e.remindDays) + if (e.remindDays >= 0) " · a notification on this phone" else "", first = true, icon = "bell", onClick = onEdit)
             }
             FdSectionTitle("Documents") { Text("${pinned.size + ownDocs.size}", style = fdText(11f, FontWeight.Medium, c.muted)) }
             // ✕ hides it while you're on this page; it's offered again the next time you open the event.
             // "View & add" opens the vault list with these already ticked; nothing is added until you tap Add there.
-            if (suggestions.isNotEmpty() && !hideSuggestion) FdBanner("sparkle", "${suggestions.size} travel document${if (suggestions.size == 1) "" else "s"} of the people going",
+            if (!readOnly && suggestions.isNotEmpty() && !hideSuggestion) FdBanner("sparkle", "${suggestions.size} travel document${if (suggestions.size == 1) "" else "s"} of the people going",
                 Modifier.padding(start = 20.dp, end = 20.dp, bottom = 10.dp)) {
                 FdTextButton("View & add", { pickSuggested = suggestions.map { it.id }.toSet(); picking = true })
                 FdIconButton("close", { hideSuggestion = true }, size = 32.dp, iconSize = 15.dp, tint = c.muted, description = "Not now")
@@ -212,7 +216,7 @@ fun EventScreen(eventId: String, onBack: () -> Unit, onEdit: () -> Unit, onDocum
                     EventDocGroup("Common", common.size + ownDocs.size) {
                         Box(Modifier.size(24.dp).clip(CircleShape).background(c.mix(c.accent, .16f, c.surface)), contentAlignment = Alignment.Center) { FdIcon("people", 15.dp, tint = c.accent) }
                     }
-                    if (common.isEmpty() && ownDocs.isEmpty()) Text("Tickets, hotel bookings, passes… for everyone going.", style = fdText(13.5f, color = c.muted),
+                    if (common.isEmpty() && ownDocs.isEmpty()) Text(if (readOnly) "Nothing added yet." else "Tickets, hotel bookings, passes… for everyone going.", style = fdText(13.5f, color = c.muted),
                         modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth().dashedBorder(c.line, radius = 18.dp).padding(horizontal = 16.dp, vertical = 14.dp))
                     else FdList {
                         common.forEachIndexed { i, d -> FdListItem(d.name, d.tail(), first = i == 0, onClick = { onDocument(d.id) }, leading = { FdDocIcon(d, 42.dp) }) }
@@ -221,12 +225,21 @@ fun EventScreen(eventId: String, onBack: () -> Unit, onEdit: () -> Unit, onDocum
                         }
                     }
                     // Uploads for the event belong to the Common vault (you, if there's none) and show only here.
-                    FdButton("Upload document", { (members.firstOrNull { it.shared } ?: self)?.let { onAddTicket(it.id) } },
+                    if (!readOnly) FdButton("Upload document", { (members.firstOrNull { it.shared } ?: self)?.let { onAddTicket(it.id) } },
                         Modifier.padding(start = 20.dp, end = 20.dp, top = 10.dp), BtnKind.Ghost, icon = "upload")
                 }
             }
-            FdButton("Pin from people's vaults", { pickSuggested = emptySet(); picking = true }, Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp), BtnKind.Ghost, icon = "people")
+            if (!readOnly) FdButton("Pin from people's vaults", { pickSuggested = emptySet(); picking = true }, Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp), BtnKind.Ghost, icon = "people")
             // Notes: always here, written right on the page and saved as you type (a moment after you stop).
+            if (readOnly) {
+                if (e.notes.isNotBlank()) {
+                    FdSectionTitle("Notes")
+                    Text(com.familydocs.app.ui.ds.NoteFormat.reading(e.notes).text, style = fdText(15f, color = c.fg),
+                        modifier = Modifier.padding(horizontal = 20.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.surface)
+                            .border(1.5.dp, c.line, RoundedCornerShape(14.dp)).padding(12.dp))
+                }
+                Spacer(Modifier.height(30.dp))
+            } else {
             FdSectionTitle("Notes")
             var note by remember(e.id) { mutableStateOf(e.notes) }
             LaunchedEffect(note) {
@@ -237,6 +250,7 @@ fun EventScreen(eventId: String, onBack: () -> Unit, onEdit: () -> Unit, onDocum
             // *bold*, _italic_, ~strike~, ```mono``` like WhatsApp: styled as you type, clean when you're done
             com.familydocs.app.ui.ds.FdNotesField(note, { note = it }, Modifier.padding(horizontal = 20.dp), placeholder = "Hotel, train times, what to carry… (saved as you type)")
             FdButton("Delete event", { confirmDelete = true }, Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 30.dp), BtnKind.Ghost, icon = "trash", contentColor = c.danger)
+            }
         }
     }
 

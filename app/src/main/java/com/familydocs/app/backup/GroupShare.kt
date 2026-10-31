@@ -5,6 +5,7 @@ import com.familydocs.app.data.AdminEdits
 import com.familydocs.app.data.Attachment
 import com.familydocs.app.data.DisplayMode
 import com.familydocs.app.data.DocumentEntity
+import com.familydocs.app.data.EventEntity
 import com.familydocs.app.data.FileStore
 import com.familydocs.app.data.GroupEntity
 import com.familydocs.app.data.MemberEntity
@@ -219,6 +220,31 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
             .put("logins", sealedLogins(g, me, pws))
             // Who else you read: someone who joins through you finds the rest of the group from here.
             .put("peers", JSONArray(g.peerList.map { JSONObject().put("key", it.key).put("name", it.name).put("index", it.index) }))
+        // The Common vault's name and picture are everyone's: the newest change wins on every phone.
+        common?.let { c -> index.put("commonAt", commonStamp(g.id, c)) }
+        // Events you made that someone else can see, with the documents added just for them.
+        val shared = dao.eventsNow().filter { it.groupId == g.id && !it.id.startsWith("s:") && (it.visibleIds.isEmpty() || it.visibleIds.any { v -> v != me.id }) }
+        fun person(id: String): JSONObject? = when {
+            id == me.id -> JSONObject().put("k", me.id).put("id", me.id)
+            id == common?.id -> JSONObject().put("k", "common")
+            id.startsWith("s:${g.id}:") -> id.removePrefix("s:${g.id}:").split(':', limit = 2).takeIf { it.size == 2 }?.let { (k, rest) -> JSONObject().put("k", k).put("id", rest) }
+            else -> null
+        }
+        fun docRef(id: String): JSONObject? = if (id.startsWith("s:${g.id}:")) person(id) else JSONObject().put("k", me.id).put("id", id)
+        index.put("events", JSONArray(shared.map { e ->
+            JSONObject().put("id", e.id).put("name", e.name).put("art", e.art).put("photo", upload(e.photoFile) ?: JSONObject.NULL)
+                .put("start", e.startDay).put("end", e.endDay ?: JSONObject.NULL).put("notes", e.notes).put("created", e.createdAt)
+                .put("people", JSONArray(e.peopleIds.mapNotNull(::person))).put("visible", JSONArray(e.visibleIds.mapNotNull(::person)))
+                .put("pins", JSONArray(e.pinIds.mapNotNull(::docRef)))
+        }))
+        val sharedIds = shared.map { it.id }.toSet()
+        index.put("eventDocs", JSONArray(dao.allDocumentsNow().filter { it.eventId in sharedIds && it.origin == null }.map { d ->
+            JSONObject().put("id", d.id).put("event", d.eventId).put("kind", if (d.memberId == common?.id) "common" else "self").put("name", d.name)
+                .put("fields", d.fieldsJson).put("text", d.rawText).put("ocr", d.readByOcr).put("country", d.country ?: JSONObject.NULL)
+                .put("display", d.display.name).put("flag", d.showFlag ?: JSONObject.NULL).put("created", d.createdAt).put("updated", d.updatedAt)
+                .put("files", JSONArray(d.attachments.mapNotNull { a -> upload(a.id)?.let { JSONObject().put("f", it).put("mime", a.mime) } }))
+                .put("picture", upload(d.pictureFile) ?: JSONObject.NULL)
+        }))
         // admin changes nobody picked up for two months are dropped
         synchronized(prefs) { ops(g.id).let { all -> all.filter { System.currentTimeMillis() - it.optLong("at") < OP_LIFE }.let { if (it.size != all.size) saveOps(g.id, it) } } }
         meta(index, g, me, ::upload)
@@ -282,7 +308,23 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
         val keepMembers = mutableSetOf<String>()
         j.getJSONArray("members").forEachObj { m ->
             val kind = m.optString("kind")
-            if (kind == "common") { common?.let { memberIds[m.getString("id")] = it.id }; return@forEachObj }
+            if (kind == "common") {
+                common?.let { c ->
+                    memberIds[m.getString("id")] = c.id
+                    // their Common changed more recently than yours: take its name and picture
+                    val theirs = j.optLong("commonAt", 0L)
+                    if (theirs > commonStamp(g.id, c)) {
+                        val photo = m.optStringOrNull("photo")?.let { fetch(it) }
+                        if (m.optStringOrNull("photo") == null || photo != null) {
+                            val now = c.copy(name = m.optString("name").ifBlank { c.name }, avatar = m.optStringOrNull("avatar"), photoFile = photo)
+                            dao.upsertMember(now)
+                            synchronized(prefs) { prefs.edit().putString("common-sig:${g.id}", commonSig(now)).putLong("common-at:${g.id}", theirs).apply() }
+                            changed++
+                        }
+                    }
+                }
+                return@forEachObj
+            }
             // Only the account holder themselves: people their phone made up (older versions) are not group members.
             if (kind != "self") return@forEachObj
             val id = prefix + m.getString("id")
@@ -341,6 +383,51 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
             ))
             keepDocs += id; changed++
         }
+
+        // ---- their events that you can see (read-only here), with the documents added for them ----
+        val keepEvents = mutableSetOf<String>()
+        val mySelf = dao.selfNow()?.id
+        fun person(o: JSONObject): String? = when (val k = o.optString("k")) {
+            myKey -> mySelf; "common" -> common?.id; "" -> null; else -> "s:${g.id}:$k:${o.optString("id")}"
+        }
+        fun refs(a: JSONArray?) = a?.let { (0 until it.length()).map { i -> it.getJSONObject(i) } }.orEmpty()
+        j.optJSONArray("events")?.forEachObj { ev ->
+            val visible = refs(ev.optJSONArray("visible"))
+            if (visible.isNotEmpty() && visible.none { it.optString("k") == myKey }) return@forEachObj
+            val id = prefix + ev.getString("id")
+            keepEvents += id
+            val old = dao.eventNow(id)
+            val row = EventEntity(
+                id = id, name = ev.getString("name"), art = ev.optString("art", "trip"), photoFile = ev.optStringOrNull("photo")?.let { fetch(it) },
+                startDay = ev.getString("start"), endDay = ev.optStringOrNull("end"),
+                people = refs(ev.optJSONArray("people")).mapNotNull(::person).joinToString(","),
+                visibleTo = visible.mapNotNull(::person).joinToString(","),
+                pins = refs(ev.optJSONArray("pins")).mapNotNull { r -> if (r.optString("k") == myKey) r.optString("id") else "s:${g.id}:${r.optString("k")}:${r.optString("id")}" }.joinToString(","),
+                remindDays = old?.remindDays ?: -1, notes = ev.optString("notes"), createdAt = ev.optLong("created", old?.createdAt ?: 0L), groupId = g.id,
+            )
+            if (row != old) { dao.upsertEvent(row); if (old == null) activity += "added the event ${row.name}" }
+        }
+        j.optJSONArray("eventDocs")?.forEachObj { d ->
+            val ev = prefix + d.getString("event")
+            if (ev !in keepEvents) return@forEachObj
+            val member = (if (d.optString("kind") == "common") common?.id else selfRow) ?: return@forEachObj
+            val id = prefix + d.getString("id")
+            keepDocs += id
+            val existing = dao.documentNow(id)
+            val atts = mutableListOf<Attachment>()
+            d.optJSONArray("files")?.forEachObj { f -> fetch(f.getString("f"))?.let { atts += Attachment(it, f.optString("mime", "image/jpeg")) } }
+            if (existing != null && existing.updatedAt == d.optLong("updated") && existing.attachments.map { it.id } == atts.map { it.id }) return@forEachObj
+            dao.upsertDocument(DocumentEntity(
+                id = id, memberId = member, name = d.getString("name"), fileId = atts.firstOrNull()?.id, fileMime = atts.firstOrNull()?.mime,
+                display = runCatching { DisplayMode.valueOf(d.getString("display")) }.getOrDefault(DisplayMode.ICON),
+                pictureFile = d.optStringOrNull("picture")?.let { fetch(it) }, fieldsJson = d.optString("fields", "[]"), rawText = d.optString("text"),
+                readByOcr = d.optBoolean("ocr"), country = d.optStringOrNull("country"), createdAt = d.optLong("created"), updatedAt = d.optLong("updated"),
+                showFlag = if (d.isNull("flag")) null else d.optBoolean("flag"), eventId = ev, origin = p.key,
+                moreFiles = Attachment.encode(atts.drop(1)),
+            ))
+            changed++
+        }
+        removeEvents(g, p.key, keepEvents)
 
         val keepPws = mutableSetOf<String>()
         val hadPws = if (common != null) dao.receivedPasswords(p.key, "$prefix%").map { it.id }.toSet() else emptySet()
@@ -486,6 +573,22 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
         val o = JSONObject(prefs.getString(key, null) ?: return mutableMapOf()); o.keys().asSequence().associateWith { o.optLong(it) }.toMutableMap()
     }.getOrDefault(mutableMapOf())
     private fun putLongMap(key: String, m: Map<String, Long>) { prefs.edit().putString(key, JSONObject().apply { m.forEach { (k, v) -> put(k, v) } }.toString()).apply() }
+    /**
+     * When this phone's Common vault (name, picture) last changed: noticed by comparing it with what was shared last
+     * time. Unknown before this existed: a Common with a photo counts as slightly newer than one without.
+     */
+    private fun commonSig(c: MemberEntity) = sha("${c.name}|${c.avatar}|${c.photoFile}")
+    private fun commonStamp(gid: String, c: MemberEntity): Long = synchronized(prefs) {
+        val sig = commonSig(c); val was = prefs.getString("common-sig:$gid", null)
+        val at = when {
+            was == null -> if (c.photoFile != null) 1L else 0L
+            was != sig -> System.currentTimeMillis()
+            else -> prefs.getLong("common-at:$gid", 0L)
+        }
+        prefs.edit().putString("common-sig:$gid", sig).putLong("common-at:$gid", at).apply()
+        at
+    }
+
     /**
      * Another admin's changes to someone else's things (from that admin's share), so they show on this phone too
      * straight away, not only once the person's own phone has taken them over and shared them again.
@@ -719,8 +822,17 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
         dao.upsertGroup(g.copy(creator = creator))
     }
 
+    /** [key]'s events that are no longer shared with you (or the whole lot, when they leave): gone from this phone. */
+    private suspend fun removeEvents(g: GroupEntity, key: String, keep: Set<String> = emptySet()) {
+        dao.eventsNow().filter { it.id.startsWith("s:${g.id}:$key:") && it.id !in keep }.forEach { e ->
+            dao.eventDocumentsNow(e.id).forEach { d -> d.attachments.forEach { files.delete(it.id) }; files.delete(d.pictureFile); dao.deleteDocument(d.id) }
+            files.delete(e.photoFile); dao.deleteEventRow(e.id)
+        }
+    }
+
     private suspend fun removeFrom(g: GroupEntity, key: String, keepDocs: Set<String>, keepMembers: Set<String>, keepPws: Set<String>) {
         val prefix = "s:${g.id}:$key:%"
+        if (keepMembers.isEmpty()) removeEvents(g, key)
         dao.receivedDocuments(key, prefix).filter { it.id !in keepDocs }.forEach { d ->
             d.attachments.forEach { files.delete(it.id) }; files.delete(d.pictureFile); dao.deleteDocument(d.id)
         }
