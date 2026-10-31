@@ -15,6 +15,9 @@ import com.familydocs.app.data.VaultDao
 import com.familydocs.app.domain.GroupCodes
 import com.familydocs.app.domain.GroupInvite
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -45,6 +48,35 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
                  private val crypto: com.familydocs.app.security.CryptoManager) : AdminEdits {
     private val prefs = context.getSharedPreferences("group_share", Context.MODE_PRIVATE)
     private val running = Mutex()
+
+    /**
+     * Quick look at everyone's shares while the app is open: no Google sign-in needed (shares are public links), and a
+     * share that hasn't changed costs one tiny request. Only changed ones are downloaded and read. Returns how much changed.
+     */
+    suspend fun poll(): Int = running.withLock { withContext(Dispatchers.IO) {
+        val me = dao.selfNow() ?: return@withContext 0
+        var n = 0
+        dao.groupsNow().filter { it.peerList.isNotEmpty() }.forEach { g ->
+            g.peerList.forEach { p ->
+                if (dao.groupNow(g.id)?.peerList?.any { it.key == p.key } != true) return@forEach
+                runCatching { n += read(dao.groupNow(g.id) ?: g, p, me.id) } // quiet: the full sync reports problems
+            }
+        }
+        n
+    } }
+
+    /** Someone changed one of your events (read by [poll]): it should be shared on. */
+    val wantsPublish: Boolean get() = synchronized(ownEventsChanged) { ownEventsChanged.isNotEmpty() }
+
+    /** Shares your latest changes right away, without reading the others (that's [poll]'s job). */
+    suspend fun publishNow(accessToken: String) = running.withLock { withContext(Dispatchers.IO) {
+        val drive = DriveClient(accessToken)
+        val me = dao.selfNow() ?: return@withContext
+        dao.groupsNow().filter { it.shareIndex != null || it.peerList.isNotEmpty() }.forEach { g ->
+            synchronized(ownEventsChanged) { ownEventsChanged.remove(g.id) }
+            publish(drive, g, me)
+        }
+    } }
 
     /** Publishes your share of every shared group and reads everyone else's. Returns what changed, for the UI. */
     suspend fun sync(accessToken: String, only: String? = null, onProgress: (String) -> Unit = {}): String = running.withLock { withContext(Dispatchers.IO) {
@@ -140,11 +172,13 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
             dao.upsertMember(MemberEntity(java.util.UUID.randomUUID().toString(), "Common", "Shared", null, createdAt = 0L, shared = true, groupId = base.id))
         val peer = Peer(inv.from, inv.fromName, inv.index)
         readmit(base.id, peer.key)
+        // (re)joining: every share in the group is read in full again
+        prefs.edit().apply { prefs.all.keys.filter { it.startsWith("seen:${base.id}:") }.forEach { remove(it) } }.apply()
         val g: GroupEntity = base.copy(peers = Peer.encode(base.peerList.filter { it.key != peer.key } + peer))
         dao.upsertGroup(g)
         // Read it now (this also checks the invite works); if the connection fails, the next sync tries again.
         val problem = running.withLock {
-            val err = runCatching { read(g, peer, me.id) }.exceptionOrNull()?.let { it.message ?: "Couldn't read the share yet" }
+            val err = runCatching { read(g, peer, me.id, quick = false) }.exceptionOrNull()?.let { it.message ?: "Couldn't read the share yet" }
             // Publish yours too, so the invite you send back works right away.
             if (accessToken != null) runCatching { publish(DriveClient(accessToken), dao.groupNow(g.id)!!, me) }
             err
@@ -178,12 +212,24 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
     private val ownEventsChanged = mutableSetOf<String>()
 
     private suspend fun publish(drive: DriveClient, g: GroupEntity, me: MemberEntity): GroupEntity {
+        // The share's folder is looked up (and renamed with the group) only now and then, not on every change.
+        val cached = prefs.getString("folder:${g.id}", null)?.split('\n')
+        val fresh = cached != null && cached.size == 3 && cached[0] == g.name && cached[1] == g.shareFolder &&
+            System.currentTimeMillis() - (cached[2].toLongOrNull() ?: 0L) < FOLDER_CHECK
+        val folder = if (fresh) cached!![1] else {
+            val root = drive.folder("Lararium", null, mapOf(DriveBackup.P_ROOT to "1"))
+            val groupFolder = drive.folder(g.name, root, mapOf(DriveBackup.P_GROUP to g.id), "Lararium group · its people, Common vault and events")
+            drive.folder("Shared with ${g.name} (encrypted)", groupFolder, mapOf(P_SHARE to g.id),
+                "Encrypted copy for the other members of ${g.name}. Only readable in Lararium with the group's code.")
+                .also { prefs.edit().putString("folder:${g.id}", "${g.name}\n$it\n${System.currentTimeMillis()}").apply() }
+        }
+        try { return publishInto(drive, g, me, folder, tidy = !fresh) }
+        catch (e: Exception) { prefs.edit().remove("folder:${g.id}").apply(); throw e } // look it up again next time
+    }
+
+    private suspend fun publishInto(drive: DriveClient, g: GroupEntity, me: MemberEntity, folder: String, tidy: Boolean): GroupEntity {
         val key = key(g); val salt = GroupInvite.salt(g.id)
         fun seal(b: ByteArray) = BackupCrypto.seal(b, key, salt)
-        val root = drive.folder("Lararium", null, mapOf(DriveBackup.P_ROOT to "1"))
-        val groupFolder = drive.folder(g.name, root, mapOf(DriveBackup.P_GROUP to g.id), "Lararium group · its people, Common vault and events")
-        val folder = drive.folder("Shared with ${g.name} (encrypted)", groupFolder, mapOf(P_SHARE to g.id),
-            "Encrypted copy for the other members of ${g.name}. Only readable in Lararium with the group's code.")
 
         val all = dao.membersNow()
         val common = all.firstOrNull { it.shared && it.groupId == g.id }
@@ -198,14 +244,16 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
         fun upload(fileId: String?): String? {
             fileId ?: return null
             val tag = "${g.id}:$fileId"
-            prefs.getString(tag, null)?.let { live += tag; return it }
+            prefs.getString(tag, null)?.let { synchronized(live) { live += tag }; return it }
             val bytes = files.get(fileId) ?: return null
             val id = drive.upsertFile(folder, "$fileId.fdx", seal(bytes), OCTET, mapOf(P_SHARE_FILE to tag), null, P_SHARE_FILE)
             drive.shareWithLink(id)
-            prefs.edit().putString(tag, id).apply(); live += tag
+            prefs.edit().putString(tag, id).apply(); synchronized(live) { live += tag }
             return id
         }
 
+        // Built twice: first only to see which files are new, so they upload side by side instead of one after another.
+        suspend fun build(upload: (String?) -> String?): JSONObject {
         val index = JSONObject().put("v", 1).put("group", g.id).put("name", g.name)
             .put("from", JSONObject().put("key", me.id).put("name", dao.accountNow()?.name ?: me.name))
             .put("members", JSONArray(people.map { m ->
@@ -258,19 +306,35 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
         }))
         // admin changes nobody picked up for two months are dropped
         synchronized(prefs) { ops(g.id).let { all -> all.filter { System.currentTimeMillis() - it.optLong("at") < OP_LIFE }.let { if (it.size != all.size) saveOps(g.id, it) } } }
-        meta(index, g, me, ::upload)
+        meta(index, g, me, upload)
+        return index
+        }
+        val fresh = linkedSetOf<String>()
+        build { id -> if (id != null && prefs.getString("${g.id}:$id", null) == null) fresh += id; null }
+        if (fresh.isNotEmpty()) kotlinx.coroutines.coroutineScope {
+            val gate = kotlinx.coroutines.sync.Semaphore(4)
+            fresh.map { id -> async(Dispatchers.IO) { gate.withPermit { runCatching { upload(id) } } } }.awaitAll()
+        }
+        val index = build(::upload)
         val text = index.toString()
         val hash = sha(text)
         var out = g
         if (g.shareIndex == null || prefs.getString("${g.id}:index-hash", null) != hash || g.shareFolder != folder) {
-            val id = drive.upsertFile(folder, "index.fdx", seal(text.toByteArray()), OCTET, mapOf(P_SHARE_FILE to "${g.id}:index"), null, P_SHARE_FILE)
+            val sealed = seal(text.toByteArray())
+            // the same file, its contents replaced in one request (it keeps its id and link)
+            val id = g.shareIndex?.takeIf { g.shareFolder == folder && runCatching { drive.updateContent(it, sealed, OCTET) }.isSuccess }
+                ?: drive.upsertFile(folder, "index.fdx", sealed, OCTET, mapOf(P_SHARE_FILE to "${g.id}:index"), null, P_SHARE_FILE)
             if (g.shareIndex != id) drive.shareWithLink(id)
             out = g.copy(shareFolder = folder, shareIndex = id)
-            dao.upsertGroup(out)
+            if (out != g) dao.upsertGroup(out)
             prefs.edit().putString("${g.id}:index-hash", hash).apply()
-            // Files nothing points to any more (deleted documents, replaced scans) leave Drive.
+        }
+        // Files nothing points to any more (deleted documents, replaced scans) leave Drive: only when something was dropped
+        // (and now and then, for leftovers).
+        val stale = prefs.all.keys.filter { it.startsWith("${g.id}:") && !it.endsWith(":index-hash") && it !in live }
+        if (stale.isNotEmpty() || tidy) {
             drive.children(folder).filter { val t = it.props[P_SHARE_FILE]; t != null && t != "${g.id}:index" && t !in live }.forEach { drive.trash(it.id) }
-            prefs.edit().apply { prefs.all.keys.filter { it.startsWith("${g.id}:") && !it.endsWith(":index-hash") && it !in live }.forEach { remove(it) } }.apply()
+            prefs.edit().apply { stale.forEach { remove(it) } }.apply()
         }
         return out
     }
@@ -278,10 +342,25 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
     // ---------------- reading ----------------
 
     /** Reads one member's share into this phone. Returns how many documents were new or changed. */
-    private suspend fun read(g: GroupEntity, p: Peer, myKey: String): Int {
+    private suspend fun read(g: GroupEntity, p: Peer, myKey: String, quick: Boolean = true): Int {
         val k = key(g)
         fun fetch(driveId: String) = fetchFile(driveId, k)
-        val j = JSONObject(String(BackupCrypto.open(DriveClient.publicDownload(p.index), k)))
+        // Unchanged since it was last read (and nothing new here for them either): skipped after a 64-byte peek.
+        val seenKey = "seen:${g.id}:${p.key}"
+        val local = sha(synchronized(prefs) { (ops(g.id) + relayed(g.id)).filter { it.optString("to") == p.key }.joinToString("\n") }) + "|" + com.familydocs.app.BuildConfig.VERSION_CODE
+        var whole: ByteArray? = null
+        if (quick) {
+            val (head, complete) = DriveClient.publicPeek(p.index)
+            val was = prefs.getString(seenKey, null)
+            if (was != null && was.substringBeforeLast('|') == mark(head) + "|" + local &&
+                System.currentTimeMillis() - (was.substringAfterLast('|').toLongOrNull() ?: 0L) < FULL_READ) {
+                if (p.err != null) dao.groupNow(g.id)?.let { now -> dao.upsertGroup(now.copy(peers = Peer.encode(now.peerList.map { if (it.key == p.key) it.copy(err = null) else it }))) }
+                return 0
+            }
+            if (complete) whole = head
+        }
+        val sealed = whole ?: DriveClient.publicDownload(p.index)
+        val j = JSONObject(String(BackupCrypto.open(sealed, k)))
         require(j.getString("group") == g.id) { "This share belongs to another group" }
         val from = j.getJSONObject("from")
         val prefix = "s:${g.id}:${p.key}:"
@@ -524,8 +603,12 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
         j.optJSONArray("peers")?.forEachObj { o -> val pk = o.getString("key")
             if (pk != myKey && pk !in known && System.currentTimeMillis() - (gone[pk] ?: 0L) > REMOVED_QUIET) known[pk] = Peer(pk, o.optString("name"), o.getString("index")) }
         dao.upsertGroup(now.copy(peers = Peer.encode(known.values.toList())))
+        prefs.edit().putString(seenKey, mark(sealed) + "|" + local + "|" + System.currentTimeMillis()).apply()
         return changed
     }
+
+    /** A share's version: its first bytes (a new random IV every time it's re-encrypted). */
+    private fun mark(b: ByteArray) = b.copyOf(minOf(64, b.size)).joinToString("") { "%02x".format(it) }
 
     // ---------------- Common logins, sealed to each member's phone ----------------
 
@@ -860,7 +943,7 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
 
     private suspend fun removeFrom(g: GroupEntity, key: String, keepDocs: Set<String>, keepMembers: Set<String>, keepPws: Set<String>) {
         val prefix = "s:${g.id}:$key:%"
-        if (keepMembers.isEmpty()) removeEvents(g, key)
+        if (keepMembers.isEmpty()) { removeEvents(g, key); prefs.edit().remove("seen:${g.id}:$key").apply() }
         dao.receivedDocuments(key, prefix).filter { it.id !in keepDocs }.forEach { d ->
             d.attachments.forEach { files.delete(it.id) }; files.delete(d.pictureFile); dao.deleteDocument(d.id)
         }
@@ -883,6 +966,10 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
         const val P_SHARE = "fd_share"; const val P_SHARE_FILE = "fd_share_file"
         private val DOC_KINDS = setOf("doc", "deldoc")
         private const val OP_LIFE = 60L * 24 * 3600 * 1000
+        /** An unchanged share is still read in full this often, just in case. */
+        private const val FULL_READ = 10L * 60 * 1000
+        /** How often the share's Drive folder is looked up again (it's remembered in between). */
+        private const val FOLDER_CHECK = 6L * 3600 * 1000
         /** For a week after someone is removed, other members' (older) lists of who's in the group don't bring them back. */
         private const val REMOVED_QUIET = 7L * 24 * 3600 * 1000
         private const val OCTET = "application/octet-stream"

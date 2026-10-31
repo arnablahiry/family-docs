@@ -14,7 +14,8 @@ import java.util.concurrent.TimeUnit
 class DriveClient(private val token: String) {
     data class Item(val id: String, val name: String, val mime: String, val props: Map<String, String>, val parents: List<String> = emptyList())
 
-    private val http = OkHttpClient.Builder().readTimeout(2, TimeUnit.MINUTES).writeTimeout(2, TimeUnit.MINUTES).build()
+    // one client for the whole app: connections to Drive stay open between syncs (no new handshake every time)
+    private val http get() = SHARED
 
     private fun call(req: Request.Builder): String =
         http.newCall(req.header("Authorization", "Bearer $token").build()).execute().use { r ->
@@ -140,9 +141,15 @@ class DriveClient(private val token: String) {
         call(Request.Builder().url("$FILES/$id/permissions?fields=id").post(JSONObject().put("role", "reader").put("type", "anyone").toString().toRequestBody(JSON)))
     }
 
+    /** Replaces the contents of file [id] (one request: no lookup first). */
+    fun updateContent(id: String, bytes: ByteArray, mime: String) {
+        call(Request.Builder().url("$UPLOAD/$id?uploadType=media&fields=id").patch(bytes.toRequestBody(mime.toMediaType())))
+    }
+
     fun trash(id: String) { call(Request.Builder().url("$FILES/$id").patch(JSONObject().put("trashed", true).toString().toRequestBody(JSON))) }
 
     companion object {
+        private val SHARED = OkHttpClient.Builder().readTimeout(2, TimeUnit.MINUTES).writeTimeout(2, TimeUnit.MINUTES).build()
         const val FOLDER = "application/vnd.google-apps.folder"
         private const val FILES = "https://www.googleapis.com/drive/v3/files"
         private const val UPLOAD = "https://www.googleapis.com/upload/drive/v3/files"
@@ -154,6 +161,20 @@ class DriveClient(private val token: String) {
          * Downloads a file someone shared by link (no sign-in needed: it's how you read another member's encrypted share,
          * which this app can't see through its own Drive access). Fails clearly when the link isn't shared or was removed.
          */
+        /**
+         * The first [size] bytes of a public file, or all of it when Drive sends the whole file anyway (then `complete`).
+         * A share is re-encrypted with a new random IV every time it changes, so these bytes tell whether it did.
+         */
+        fun publicPeek(id: String, size: Int = 64): Pair<ByteArray, Boolean> {
+            val url = "https://drive.usercontent.google.com/download?id=" + URLEncoder.encode(id, "UTF-8") + "&export=download&confirm=t"
+            return plain.newCall(Request.Builder().url(url).header("Range", "bytes=0-${size - 1}").build()).execute().use { r ->
+                val type = r.header("Content-Type").orEmpty()
+                check(r.isSuccessful && !type.startsWith("text/html")) { if (r.code == 404 || type.startsWith("text/html")) "That share isn't available (it may have been removed)" else "Drive ${r.code}" }
+                val b = r.body!!.bytes()
+                b to (r.code != 206)
+            }
+        }
+
         fun publicDownload(id: String): ByteArray {
             val url = "https://drive.usercontent.google.com/download?id=" + URLEncoder.encode(id, "UTF-8") + "&export=download&confirm=t"
             return plain.newCall(Request.Builder().url(url).build()).execute().use { r ->

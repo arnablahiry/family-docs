@@ -1,6 +1,8 @@
 package com.familydocs.app
 
 import android.content.Context
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.debounce
 import com.familydocs.app.auth.GoogleAccountHelper
 import com.familydocs.app.backup.BackupKeyStore
 import com.familydocs.app.backup.BackupWorker
@@ -24,8 +26,8 @@ class AppContainer(context: Context) {
     val repo: VaultRepository by lazy {
         // Any change to the vault: back up to Drive / update shared groups a couple of minutes later.
         VaultRepository(db.dao(), files).also { r ->
-            // (both check whether backup or group sharing is on): the share goes out within seconds, the backup ~2 min later
-            r.onChanged = { BackupWorker.shareNow(app); BackupWorker.soon(app) }
+            // (both check whether backup or group sharing is on): the share goes out within a second, the backup ~2 min later
+            r.onChanged = { publishSoon(); BackupWorker.soon(app) }
             r.admin = { share } // a group admin's changes to other members' things
             r.groupId.value = settings.value.currentGroup
         }
@@ -54,7 +56,36 @@ class AppContainer(context: Context) {
     val backup: DriveBackup by lazy { DriveBackup(app, repo, files, BackupKeyStore(app, crypto), passcode, loginLock) }
     /** Groups shared between accounts (encrypted shares in each member's Drive). */
     val share: com.familydocs.app.backup.GroupShare by lazy { com.familydocs.app.backup.GroupShare(app, db.dao(), files, crypto) }
-    /** Asking to join a group with just its code; members approve in the app (needs the Firebase settings at build time). */
+
+    // ---- your changes reach the group within a second: shared right here (the background job is only the fallback) ----
+    private val publishRequests = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 1,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST)
+    /** Drive access, kept for a while so each change doesn't ask Google again. */
+    private var driveToken: Pair<String, Long>? = null
+
+    /** Shares your changes now (a burst of changes, like typing notes, goes out as one). */
+    fun publishSoon() { publishRequests.tryEmit(Unit) }
+
+    @OptIn(kotlinx.coroutines.FlowPreview::class)
+    private fun startPublishing() = appScope.launch {
+        publishRequests.debounce(500).collect { publishOnce() }
+    }
+
+    private suspend fun publishOnce() {
+        if (repo.groupsNow().none { it.shareIndex != null || it.peerList.isNotEmpty() }) return
+        val ok = runCatching {
+            val token = driveToken?.takeIf { System.currentTimeMillis() < it.second }?.first ?: run {
+                val auth = backup.authorize()
+                if (auth.hasResolution()) return // needs the user (Settings shows it); the background job couldn't either
+                (auth.accessToken ?: error("No Drive access")).also { driveToken = it to System.currentTimeMillis() + 40 * 60_000L }
+            }
+            share.publishNow(token)
+        }.isSuccess
+        if (!ok) { driveToken = null; BackupWorker.shareNow(app) }
+    }
+
+    init { startPublishing() }
+
 
     /** Shows group [id] on Home and remembers it. */
     fun selectGroup(id: String?) { repo.groupId.value = id; settings.update { it.copy(currentGroup = id) } }

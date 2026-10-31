@@ -2,6 +2,10 @@
 # the app shows it once after updating, Settings lists it under "Update" before downloading, and CI puts it in the
 # release notes. One "- " line per change, written for the people using the app.
 
+## 0.9.1
+- Much faster group syncing: your changes go out within a second, and while Lararium is open the others' changes show up within seconds
+- Lighter syncs: a member's share is only downloaded when something in it changed, and only new files are uploaded (several at once)
+
 ## 0.9.0
 - Everyone an event is shared with can change it: name, dates, picture, who's going, notes, documents. The newest change shows on every phone
 - Only the person who made an event chooses who can see it, and only they can delete it
