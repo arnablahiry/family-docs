@@ -52,6 +52,13 @@ internal val ICON_PATHS: Map<String, List<Pair<String, Boolean>>> = mapOf(
     "refresh" to listOf("M20 11a8 8 0 0 0-14.3-4.3L4 9M4 4v5h5M4 13a8 8 0 0 0 14.3 4.3L20 15M20 20v-5h-5" to false),
     "dice" to listOf("M7 4h10a3 3 0 0 1 3 3v10a3 3 0 0 1 -3 3h-10a3 3 0 0 1 -3 -3v-10a3 3 0 0 1 3 -3z" to false, "M8 9a1 1 0 1 0 2 0a1 1 0 1 0 -2 0z" to false, "M14 15a1 1 0 1 0 2 0a1 1 0 1 0 -2 0z" to false, "M14 9a1 1 0 1 0 2 0a1 1 0 1 0 -2 0z" to false, "M8 15a1 1 0 1 0 2 0a1 1 0 1 0 -2 0z" to false),
     "grid" to listOf("M6 4h3a2 2 0 0 1 2 2v3a2 2 0 0 1 -2 2h-3a2 2 0 0 1 -2 -2v-3a2 2 0 0 1 2 -2z" to false, "M15 4h3a2 2 0 0 1 2 2v3a2 2 0 0 1 -2 2h-3a2 2 0 0 1 -2 -2v-3a2 2 0 0 1 2 -2z" to false, "M6 13h3a2 2 0 0 1 2 2v3a2 2 0 0 1 -2 2h-3a2 2 0 0 1 -2 -2v-3a2 2 0 0 1 2 -2z" to false, "M15 13h3a2 2 0 0 1 2 2v3a2 2 0 0 1 -2 2h-3a2 2 0 0 1 -2 -2v-3a2 2 0 0 1 2 -2z" to false),
+    // bicycle: two wheels, the frame, saddle and handlebar
+    "bike" to listOf("M2.5 15.5a3.5 3.5 0 1 0 7 0a3.5 3.5 0 1 0 -7 0z" to false, "M14.5 15.5a3.5 3.5 0 1 0 7 0a3.5 3.5 0 1 0 -7 0z" to false,
+        "M6 15.5l3.5 -6.5h6l2.5 6.5" to false, "M9.5 9l2.5 6.5h-6" to false, "M12 15.5l3.5 -6.5" to false, "M8 7h3" to false, "M14.5 6.5h2.5l-1.5 2.5" to false),
+    // fork and knife
+    "food" to listOf("M5.5 3.5v5a2 2 0 0 0 4 0v-5" to false, "M7.5 3.5v17" to false, "M17.5 20.5v-17c-2.2 1.3 -3.5 3.8 -3.5 7v3.5h3.5" to false),
+    // cocktail glass with a slice
+    "drinks" to listOf("M4.5 5h15l-7.5 8.5z" to false, "M12 13.5v6" to false, "M8.5 20h7" to false, "M15.5 5l2.5 -2.5" to false, "M7.5 8.5h9" to false),
     "minus" to listOf("M6 12h12" to false),
     "calendar" to listOf("M5 6.5h14a1.5 1.5 0 0 1 1.5 1.5v11a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 19V8A1.5 1.5 0 0 1 5 6.5z" to false,
         "M3.5 10.5h17" to false, "M8 4v4M16 4v4" to false, "M7.5 14h2M11 14h2M14.5 14h2M7.5 17h2M11 17h2" to false),

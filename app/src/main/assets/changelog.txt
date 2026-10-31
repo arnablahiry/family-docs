@@ -2,6 +2,10 @@
 # the app shows it once after updating, Settings lists it under "Update" before downloading, and CI puts it in the
 # release notes. One "- " line per change, written for the people using the app.
 
+## 0.8.8
+- More kinds of event documents, each with its own icon: bike rental, restaurant booking and drinks (car rental now also covers taxis, car hire and parking).
+- An admin's changes to someone's documents or profile now show on everyone's phone straight away, not only once that person's phone has taken them over.
+
 ## 0.8.7
 - An update that's downloading can be stopped with ✕ (on Home or in Settings); it's offered again afterwards.
 

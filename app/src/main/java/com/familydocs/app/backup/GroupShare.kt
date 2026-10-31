@@ -258,6 +258,26 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
         val pendingDel = pending.filter { it.optString("kind") == "deldoc" }.map { prefix + it.optString("doc") }.toSet()
         val pendingProfile = pending.lastOrNull { it.optString("kind") == "profile" }
 
+        // An admin reading as [p]: their changes to other people's things are kept for when those people are read.
+        if (p.key in (dao.groupNow(g.id)?.adminKeys ?: emptySet())) synchronized(prefs) {
+            val theirs = mutableListOf<JSONObject>()
+            j.optJSONArray("ops")?.forEachObj { op -> val to = op.optString("to"); if (to.isNotEmpty() && to != myKey && to != p.key) theirs += JSONObject(op.toString()).put("by", p.key) }
+            saveRelayed(g.id, relayed(g.id).filter { it.optString("by") != p.key } + theirs)
+        }
+        // Another admin's changes to [p]'s things that [p]'s phone hasn't taken over yet: shown as the admin made them.
+        val takenOver = j.optJSONArray("applied")?.let { a -> (0 until a.length()).map { a.getString(it) }.toSet() }.orEmpty()
+        val relay = synchronized(prefs) {
+            val all = relayed(g.id)
+            if (all.any { it.optString("to") == p.key && it.optString("id") in takenOver }) saveRelayed(g.id, all.filterNot { it.optString("to") == p.key && it.optString("id") in takenOver })
+            all.filter { it.optString("to") == p.key && it.optString("id") !in takenOver }.sortedBy { it.optLong("at") }
+        }
+        val relayDocs = relay.filter { it.optString("kind") == "doc" }.associate { prefix + it.getJSONObject("doc").getString("id") to it.getJSONObject("doc") }
+            .filterKeys { it !in pendingDocs && it !in pendingDel }
+        val relayDel = relay.filter { it.optString("kind") == "deldoc" && relay.none { o -> o.optString("kind") == "doc" && o.optLong("at") > it.optLong("at") && docIdOf(o) == it.optString("doc") } }
+            .map { prefix + it.optString("doc") }.toSet() - pendingDocs
+        val relayProfile = relay.lastOrNull { it.optString("kind") == "profile" }
+        var selfRow: String? = null
+
         val memberIds = mutableMapOf<String, String>()
         val keepMembers = mutableSetOf<String>()
         j.getJSONArray("members").forEachObj { m ->
@@ -269,6 +289,9 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
             memberIds[m.getString("id")] = id; keepMembers += id
             val photo = m.optStringOrNull("photo")?.let { fetch(it) }
             var row = MemberEntity(id, m.getString("name"), "Group member", photo, createdAt = 1L, avatar = m.optStringOrNull("avatar"), groupId = g.id, origin = p.key)
+            selfRow = id
+            relayProfile?.let { op -> row = row.copy(name = op.optStringOrNull("name") ?: row.name, avatar = op.optStringOrNull("avatar") ?: row.avatar,
+                photoFile = if (op.has("photo")) op.optString("photo").ifEmpty { null }?.let { fetch(it) } else row.photoFile) }
             pendingProfile?.let { op -> row = row.copy(name = op.optStringOrNull("name") ?: row.name, avatar = op.optStringOrNull("avatar") ?: row.avatar,
                 photoFile = if (op.has("photo")) op.optString("photo").ifEmpty { null } else row.photoFile) }
             dao.upsertMember(row)
@@ -281,9 +304,9 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
         j.getJSONArray("documents").forEachObj { d ->
             val member = memberIds[d.getString("member")] ?: return@forEachObj
             val id = prefix + d.getString("id")
-            if (id in pendingDel) return@forEachObj
+            if (id in pendingDel || id in relayDel) return@forEachObj
             keepDocs += id
-            if (id in pendingDocs) return@forEachObj
+            if (id in pendingDocs || id in relayDocs) return@forEachObj
             val existing = dao.documentNow(id)
             val atts = mutableListOf<Attachment>()
             d.getJSONArray("files").forEachObj { f -> fetch(f.getString("f"))?.let { atts += Attachment(it, f.optString("mime", "image/jpeg")) } }
@@ -298,6 +321,25 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
                 sortOrder = if (d.isNull("order")) null else d.getInt("order"), origin = p.key,
             ))
             changed++
+        }
+
+        // another admin's added or edited documents for them, as the admin made them
+        relayDocs.forEach { (id, d) ->
+            if (id in relayDel) return@forEach
+            val member = (if (d.optBoolean("common")) common?.id else selfRow) ?: return@forEach
+            val atts = mutableListOf<Attachment>()
+            d.optJSONArray("files")?.forEachObj { f -> fetch(f.getString("f"))?.let { atts += Attachment(it, f.optString("mime", "image/jpeg")) } }
+            val existing = dao.documentNow(id)
+            if (existing != null && existing.updatedAt == d.optLong("updated") && existing.attachments.map { it.id } == atts.map { it.id }) { keepDocs += id; return@forEach }
+            dao.upsertDocument(DocumentEntity(
+                id = id, memberId = member, name = d.getString("name"), fileId = atts.firstOrNull()?.id, fileMime = atts.firstOrNull()?.mime,
+                display = runCatching { DisplayMode.valueOf(d.getString("display")) }.getOrDefault(DisplayMode.ICON),
+                pictureFile = d.optStringOrNull("picture")?.let { fetch(it) }, fieldsJson = d.optString("fields", "[]"), rawText = d.optString("text"),
+                readByOcr = d.optBoolean("ocr"), country = d.optStringOrNull("country"), createdAt = existing?.createdAt ?: d.optLong("created", System.currentTimeMillis()),
+                updatedAt = d.optLong("updated", System.currentTimeMillis()), showFlag = if (d.isNull("flag")) null else d.optBoolean("flag"),
+                moreFiles = Attachment.encode(atts.drop(1)), sortOrder = existing?.sortOrder, origin = p.key,
+            ))
+            keepDocs += id; changed++
         }
 
         val keepPws = mutableSetOf<String>()
@@ -444,6 +486,13 @@ class GroupShare(private val context: Context, private val dao: VaultDao, privat
         val o = JSONObject(prefs.getString(key, null) ?: return mutableMapOf()); o.keys().asSequence().associateWith { o.optLong(it) }.toMutableMap()
     }.getOrDefault(mutableMapOf())
     private fun putLongMap(key: String, m: Map<String, Long>) { prefs.edit().putString(key, JSONObject().apply { m.forEach { (k, v) -> put(k, v) } }.toString()).apply() }
+    /**
+     * Another admin's changes to someone else's things (from that admin's share), so they show on this phone too
+     * straight away, not only once the person's own phone has taken them over and shared them again.
+     */
+    private fun relayed(gid: String) = jsonList("relay:$gid")
+    private fun saveRelayed(gid: String, list: List<JSONObject>) { prefs.edit().putString("relay:$gid", JSONArray(list.takeLast(200)).toString()).apply() }
+
     /** Your admin changes for other members of group [gid], not yet taken over by their phones. */
     private fun ops(gid: String) = jsonList("ops:$gid")
     private fun saveOps(gid: String, list: List<JSONObject>) { prefs.edit().putString("ops:$gid", JSONArray(list).toString()).apply() }

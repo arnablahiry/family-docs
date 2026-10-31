@@ -5,7 +5,7 @@ package com.familydocs.app.domain
  * Order matters: the first matching rule wins ("Vaccination certificate" → vaccine, not certificate).
  * Kept free of Android imports so it can be unit-tested on the JVM.
  */
-enum class DocIcon { HOUSE, BOLT, FINGERPRINT, CARD, PASSPORT, PLANE, VISA, RESIDENCE, CAR, BALLOT, SHIELD, SYRINGE, BANK, CAP, CERTIFICATE, MEDICAL, RECEIPT, ID, FILE, KEY, PEOPLE, TICKET, BED, TRAIN }
+enum class DocIcon { HOUSE, BOLT, FINGERPRINT, CARD, PASSPORT, PLANE, VISA, RESIDENCE, CAR, BALLOT, SHIELD, SYRINGE, BANK, CAP, CERTIFICATE, MEDICAL, RECEIPT, ID, FILE, KEY, PEOPLE, TICKET, BED, TRAIN, BIKE, FOOD, DRINKS }
 
 data class DocType(
     val key: String,
@@ -26,8 +26,12 @@ object DocTypes {
         Regex("transport pass|travel ?card|metro|oyster|bus pass|rail ?pass|interrail|eurail|\\bpass\\b", I) to DocType("pass", "Transport pass", DocIcon.CARD, 0xFF2F8F83),
         Regex("\\btrain\\b|\\brail(way)?\\b|\\bbus\\b|coach|ferry", I) to DocType("train", "Train / bus ticket", DocIcon.TRAIN, 0xFFB0603A),
         Regex("ticket|admission|concert|museum|\\bmatch\\b", I) to DocType("ticket", "Event ticket", DocIcon.TICKET, 0xFFC2477F),
+        // drinks and food before hotels (a "dinner reservation" isn't a hotel booking)
+        Regex("\\bdrinks?\\b|\\bbar\\b|\\bpub\\b|cocktail|\\bwine\\b|winery|brewery|\\bbeer\\b|tasting|caf[eé]|coffee", I) to DocType("drinks", "Drinks", DocIcon.DRINKS, 0xFF9A4F8E),
+        Regex("restaurant|dinner|lunch|breakfast|brunch|\\bfood\\b|\\bmeal\\b|\\btable\\b|taverna|trattoria|bistro|street food", I) to DocType("food", "Restaurant booking", DocIcon.FOOD, 0xFFC4572E),
         Regex("hotel|hostel|airbnb|\\bbooking\\b|reservation|accommodation|check-?in", I) to DocType("hotel", "Hotel booking", DocIcon.BED, 0xFF8A55A8),
-        Regex("car rental|rent(al)? ?a? ?car|hertz|avis|europcar|sixt", I) to DocType("rental", "Car rental", DocIcon.CAR, 0xFFC07A2B),
+        Regex("car rental|car hire|rent(al)? ?a? ?car|hertz|avis|europcar|sixt|\\btaxi\\b|\\bcab\\b|uber|parking", I) to DocType("rental", "Car rental", DocIcon.CAR, 0xFFC07A2B),
+        Regex("\\bbike\\b|bicycle|cycle hire|e-?bike|scooter|moped|motorbike|motorcycle", I) to DocType("bike", "Bike rental", DocIcon.BIKE, 0xFF3F8C5A),
         Regex("aadh?aa?r|uidai|आधार", I) to DocType("aadhaar", "Aadhaar", DocIcon.FINGERPRINT, 0xFFD9822B),
         Regex("\\bpan\\b|permanent account", I) to DocType("pan", "PAN Card", DocIcon.CARD, 0xFF2F6FB0),
         Regex("passport|διαβατ|pasaporte|reisepass", I) to DocType("passport", "Passport", DocIcon.PASSPORT, 0xFF284A80),
@@ -58,7 +62,7 @@ object DocTypes {
     )
 
     /** Types offered when adding a document to an event (they set the name, so the icon and colour follow). */
-    val EVENT_SUGGESTIONS = listOf("Flight ticket", "Train / bus ticket", "Event ticket", "Transport pass", "Hotel booking", "Car rental", "Travel insurance")
+    val EVENT_SUGGESTIONS = listOf("Flight ticket", "Train / bus ticket", "Event ticket", "Transport pass", "Hotel booking", "Car rental", "Bike rental", "Restaurant booking", "Drinks", "Travel insurance")
 
     /** Empty field templates used when OCR finds nothing (or the user skips the file). */
     val TEMPLATES: Map<String, List<String>> = mapOf(
@@ -68,6 +72,9 @@ object DocTypes {
         "pass" to listOf("Pass No.", "Valid From", "Valid Until", "Zones"),
         "hotel" to listOf("Booking ref", "Hotel", "Address", "Check-in", "Check-out"),
         "rental" to listOf("Booking ref", "Company", "Pick-up", "Drop-off"),
+        "bike" to listOf("Booking ref", "Company", "Pick-up", "Drop-off"),
+        "food" to listOf("Booking ref", "Restaurant", "Date & time", "Guests"),
+        "drinks" to listOf("Booking ref", "Place", "Date & time", "Guests"),
         "aadhaar" to listOf("Aadhaar Number", "Name", "Date of Birth", "Gender", "Address"),
         "pan" to listOf("PAN", "Name", "Father's Name", "Date of Birth"),
         "passport" to listOf("Passport No.", "Surname", "Given Names", "Nationality", "Date of Birth", "Date of Issue", "Date of Expiry"),

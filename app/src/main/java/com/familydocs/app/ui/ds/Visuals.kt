@@ -198,6 +198,7 @@ fun DocIcon.demoName(): String = when (this) {
     DocIcon.SYRINGE -> "syringe"; DocIcon.BANK -> "bank"; DocIcon.CAP -> "cap"; DocIcon.CERTIFICATE -> "cert"; DocIcon.MEDICAL -> "medical"
     DocIcon.RECEIPT -> "receipt"; DocIcon.ID -> "idcard"; DocIcon.FILE -> "file"; DocIcon.KEY -> "key"; DocIcon.PEOPLE -> "people"
     DocIcon.TICKET -> "ticket"; DocIcon.BED -> "bed"; DocIcon.TRAIN -> "train"
+    DocIcon.BIKE -> "bike"; DocIcon.FOOD -> "food"; DocIcon.DRINKS -> "drinks"
 }
 
 /** `.dicon`: hue-tinted rounded tile with the type icon (or the chosen picture), initials badge for unknown types. */
